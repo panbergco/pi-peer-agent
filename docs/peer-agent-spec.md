@@ -227,10 +227,42 @@ center transport (§9.3) changes nothing above the transport seam.
   `PgUp/PgDn` scroll within the expanded pane, per-peer offset, follow-tail until the
   user scrolls up, snap back at bottom · `Esc` unfocus (stays visible) · `q` hide.
 - Detail line per peer: address, session ID, and the exact resume command
-  (`pi --session <file>`), selectable for copy.
+  (`pi --session <file>`).
 - Known caveat, accepted: overlays occlude the transcript's right edge rather than
   reflowing it (pi renders the conversation full-width beneath). One keypress hides
   the dock.
+
+### 8.1 Looks like pi, because it borrows pi's own idioms
+
+The dock must read as *an overlay of a real pi session*, not a debug panel. Concretely:
+
+- **Theme-derived everything** — all colors via `ctx.ui.theme` roles (accent, dim,
+  warning…); zero hardcoded ANSI. The dock inherits the operator's theme automatically.
+- **pi's transcript idioms** — streaming cursor `▍`, dim italic thinking, role badges,
+  tool calls as one-line `read(path…)` rows — the same visual grammar as the main
+  conversation (btw's `renderTranscript` is the reference implementation).
+- **A session header per expanded pane** — `⬢ <model> · ⍏ <short-session-id> · ⟳ tick
+  4s · $cost` — deliberately echoing pi's own footer line, because each pane IS a real
+  session.
+- **Priority as color, not noise** — findings tinted by priority (info dim, steering
+  accent, interrupt warning); QUIET ticks compress to a single dim `·` in the pane's
+  tick strip, so a healthy peer looks calm.
+
+### 8.2 Copy and paste — discrete targets, two destinations
+
+Terminal-level rectangle selection is useless over a bordered overlay, so the dock
+makes copy **entry-based**: within an expanded pane, `↑/↓` moves an entry cursor over
+discrete items (finding, assistant message, tool row, the resume command line) — the
+same selection feel as pi's own lists. Then:
+
+- **`i` — insert into the main prompt**: appends the selected entry's plain text to the
+  editor via `ctx.ui.setEditorText(getEditorText() + …)` — drop a peer's finding or a
+  quote from its transcript straight into what you're about to say, no clipboard round
+  trip, cursor lands back in the main editor.
+- **`y` — yank to system clipboard**: pi's native `copyToClipboard()` (OSC 52 — works
+  over SSH); `Y` yanks the peer's entire visible pane; on the detail line, `y` yanks
+  the ready-to-run resume command.
+- Every yank/insert confirms with a transient `ctx.ui.setStatus` flash, never a modal.
 
 ## 9. Transports (the seam)
 
@@ -323,6 +355,7 @@ the ledger is the coordination record — the pair reconstructs any incident.
 | D-07 | Verdict-line protocol (QUIET/FINDING) over structured output | resolved (v1) | robust to small models; malformed ⇒ QUIET + ledger, never noise; revisit if clamp/malformed rates are high |
 | D-08 | Info priority never wakes and never steers | resolved | MACP §8.2; attention economics (P6) |
 | D-09 | Compacted context recipe: reuse parent's latest compaction summary when present, else summarize parent transcript at spawn | open | summarize-at-spawn costs one LLM call; measure whether stale-summary risk matters at P1 |
+| D-10 | Copy is entry-based (`i` insert-to-editor / `y` OSC-52 yank), not terminal selection | resolved | rectangle selection breaks over bordered overlays; `setEditorText` + `copyToClipboard` are native and verified |
 
 ## 15. Not yet specified (fog)
 
