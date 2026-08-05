@@ -8,11 +8,23 @@
     "type": "git",
     "url": "git+https://github.com/panbergco/pi-peer-agent.git"
   },
-  "keywords": ["pi", "pi-extension", "agents", "macp", "multi-agent", "peer"],
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "agents",
+    "macp",
+    "multi-agent",
+    "peer"
+  ],
   "pi": {
-    "extensions": ["./extensions/index.ts"]
+    "extensions": [
+      "./extensions/index.ts"
+    ]
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "bin": {
+    "pi-peer": "bin/pi-peer.mjs"
   }
 }

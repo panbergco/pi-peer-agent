@@ -88,6 +88,26 @@ the main session by writing `.pi/peer-agent/inbox/<name>.json`
 (`{"peer": …, "priority": "info"|"steering", "body": …}`) — delivered within seconds,
 attributed `(standalone)`.
 
+## Shell CLI — `pi-peer`
+
+Drive the crew from any terminal or script — no pi session in *that* shell needed
+(write commands are applied within ~5s by the live session; reads work always):
+
+```bash
+pi-peer list                                  # crew overview (reads roster.json)
+pi-peer findings [name]                       # delivered findings (reads the ledger)
+pi-peer launch observer "keep the record" --tick 5
+pi-peer talk observer-1 "what happened while I was away?"   # prints the reply
+pi-peer retask observer-1 "new focus" --tick 9
+pi-peer tick observer-1 7
+pi-peer model observer-1 glm-5-2
+pi-peer stop observer-1                       # or: stop all
+pi-peer --cwd /path/to/project list           # target another project
+```
+
+Commands queue as files in `.pi/peer-agent/control/`; the session acks through the
+ledger and the CLI prints the outcome (graceful timeout note if no session is live).
+
 ## Roles are markdown
 
 `peers/*.md` (bundled) · `~/.pi/agent/peers/*.md` (user) · `<project>/.pi/peers/*.md`

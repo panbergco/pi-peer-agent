@@ -14,7 +14,7 @@ import { Type } from "typebox";
 import { discoverRoles, parseTick } from "../src/roles.js";
 import { PeerManager } from "../src/runtime.js";
 import { PeerSidecar } from "../src/sidecar.js";
-import { loadConfig, readRoster } from "../src/state.js";
+import { appendEvent, loadConfig, readRoster } from "../src/state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -619,6 +619,10 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     }
   }
 
+  function appendControlAck(cwd: string, payload: Record<string, unknown>): void {
+    appendEvent(cwd, "control.applied", payload);
+  }
+
   let inboxTimer: ReturnType<typeof setInterval> | null = null;
   let peerMode: any = null; // roster entry when this session IS a peer
 
@@ -626,25 +630,95 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     return path.join(cwd, ".pi", "peer-agent", "inbox");
   }
 
+  /** Apply one CLI control command (from .pi/peer-agent/control/) and ack
+   *  through the ledger so `pi-peer` can print the outcome. */
+  async function applyControl(ctx: ExtensionContext, cmd: any): Promise<{ ok: boolean; message: string; reply?: string }> {
+    switch (cmd.action) {
+      case "launch": {
+        const role = discoverRoles(ctx.cwd).find((r) => r.name === cmd.role);
+        if (!role) return { ok: false, message: `unknown role "${cmd.role}"` };
+        const eff = cmd.tickMinutes ? { ...role, tick: Math.max(60, Math.floor(cmd.tickMinutes * 60)) } : role;
+        const peer = await manager.launch(ctx, eff, String(cmd.task ?? role.description), cmd.context);
+        return { ok: true, message: `${peer.name} launched (${peer.contextMode}, tick ${Math.round(eff.tick / 60)}m) · resume: pi --session ${peer.sessionFile}` };
+      }
+      case "talk": {
+        const res = await manager.talk(String(cmd.name), String(cmd.message), "operator");
+        if (res.status !== "ok") return { ok: false, message: `${cmd.name}: ${res.status}` };
+        return { ok: true, message: `${cmd.name} replied:`, reply: res.reply ?? "(empty)" };
+      }
+      case "retask": {
+        const ok = manager.retask(String(cmd.name), String(cmd.task));
+        if (ok && cmd.tickMinutes) manager.setTick(String(cmd.name), Math.floor(cmd.tickMinutes * 60));
+        return ok ? { ok: true, message: `${cmd.name} retasked${cmd.tickMinutes ? ` (tick → ${cmd.tickMinutes}m)` : ""}` } : { ok: false, message: `no active peer ${cmd.name}` };
+      }
+      case "tick": {
+        const ok = manager.setTick(String(cmd.name), Math.floor(Number(cmd.minutes) * 60));
+        return ok ? { ok: true, message: `${cmd.name}: tick → ${cmd.minutes}m` } : { ok: false, message: `no active peer ${cmd.name}` };
+      }
+      case "model": {
+        const res = await manager.setPeerModel(String(cmd.name), String(cmd.ref));
+        return { ok: res.ok, message: res.message };
+      }
+      case "stop": {
+        if (cmd.name === "all") {
+          await manager.stopAll();
+          return { ok: true, message: "all peers stopped (sessions retained)" };
+        }
+        const ok = await manager.stop(String(cmd.name));
+        return ok ? { ok: true, message: `${cmd.name} stopped (session retained)` } : { ok: false, message: `no active peer ${cmd.name}` };
+      }
+      default:
+        return { ok: false, message: `unknown action "${cmd.action}"` };
+    }
+  }
+
   function startInboxWatcher(ctx: ExtensionContext): void {
     if (inboxTimer) return;
     const dir = inboxDir(ctx.cwd);
     const processed = path.join(dir, "processed");
+    const ctlDir = path.join(ctx.cwd, ".pi", "peer-agent", "control");
+    const ctlProcessed = path.join(ctlDir, "processed");
     inboxTimer = setInterval(() => {
       try {
-        if (!fs.existsSync(dir)) return;
-        const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
-        if (files.length === 0) return;
-        fs.mkdirSync(processed, { recursive: true });
-        for (const f of files.slice(0, 10)) {
-          const p = path.join(dir, f);
-          try {
-            const msg = JSON.parse(fs.readFileSync(p, "utf8"));
-            manager.deliverInboxFinding(msg);
-          } catch {
-            /* malformed file — archive it anyway so it can't loop */
+        if (fs.existsSync(dir)) {
+          const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+          if (files.length > 0) {
+            fs.mkdirSync(processed, { recursive: true });
+            for (const f of files.slice(0, 10)) {
+              const p = path.join(dir, f);
+              try {
+                const msg = JSON.parse(fs.readFileSync(p, "utf8"));
+                manager.deliverInboxFinding(msg);
+              } catch {
+                /* malformed file — archive it anyway so it can't loop */
+              }
+              fs.renameSync(p, path.join(processed, f));
+            }
           }
-          fs.renameSync(p, path.join(processed, f));
+        }
+        if (fs.existsSync(ctlDir)) {
+          const files = fs.readdirSync(ctlDir).filter((f) => f.endsWith(".json"));
+          if (files.length > 0) {
+            fs.mkdirSync(ctlProcessed, { recursive: true });
+            for (const f of files.slice(0, 5)) {
+              const p = path.join(ctlDir, f);
+              let cmd: any = null;
+              try {
+                cmd = JSON.parse(fs.readFileSync(p, "utf8"));
+              } catch {
+                /* malformed */
+              }
+              fs.renameSync(p, path.join(ctlProcessed, f));
+              if (!cmd?.id) continue;
+              void applyControl(lastCtx ?? ctx, cmd)
+                .then((res) => {
+                  appendControlAck(ctx.cwd, { id: cmd.id, action: cmd.action, ...res });
+                })
+                .catch((err) => {
+                  appendControlAck(ctx.cwd, { id: cmd.id, action: cmd.action, ok: false, message: String(err).slice(0, 200) });
+                });
+            }
+          }
         }
       } catch {
         /* watcher must never break the session */

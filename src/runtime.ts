@@ -810,9 +810,13 @@ export class PeerManager {
     const peer = this.peers.get(name);
     if (!peer || peer.status === "stopped") return false;
     peer.pendingRetask = task;
+    peer.task = task; // the standing task IS the new task — roster/status must say so
     peer.backoffIdx = 0;
-    appendEvent(this.ctx?.cwd ?? process.cwd(), "peer.retasked", { peer: name, task });
+    const cwd = this.ctx?.cwd ?? process.cwd();
+    appendEvent(cwd, "peer.retasked", { peer: name, task });
     this.scheduleTick(peer, 200);
+    this.refreshRoster(cwd);
+    this.notify();
     return true;
   }
 
