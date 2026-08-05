@@ -289,13 +289,17 @@ export class PeerManager {
     }
     const toolsCwd = watchCwd ?? cwd;
     const readOnly: any[] = mod.createReadOnlyTools(toolsCwd).filter((t: any) => role.tools.includes(t.name));
+    // tools: NAME ALLOWLIST — activates exactly the role's read-only set.
+    // (noTools:"all" emptied the allowlist and left customTools registered
+    // but INERT — peers were tool-less since v1; sprint-1's producer caught
+    // the model imitating tool calls as text. Gate over faith.)
     const { session } = await mod.createAgentSession({
       cwd: toolsCwd,
       sessionManager: sm,
       model,
       modelRegistry: (ctx as any).modelRegistry,
       thinkingLevel: role.thinking ?? "low",
-      noTools: "all",
+      tools: readOnly.map((t: any) => t.name),
       customTools: readOnly,
       resourceLoader,
     });
@@ -319,6 +323,7 @@ export class PeerManager {
       tickBaseS: p.role.tick,
       status: "suspended" as PeerStatus,
       startedAt: p.startedAt,
+      ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
     if (entries.length > 0) writeRoster(cwd, entries);
     for (const p of [...this.peers.values()]) {
@@ -765,14 +770,21 @@ export class PeerManager {
     this.notify();
     let reply = "";
     try {
+      const before = (peer.session.state?.messages ?? []).length;
       await peer.session.prompt(
-        `DIRECT MESSAGE from the ${from === "main-agent" ? "MAIN AGENT you are bound to" : "human operator"} (conversational — answer directly and briefly; this is not a tick, no verdict line): ${text}`,
+        `DIRECT MESSAGE from the ${from === "main-agent" ? "MAIN AGENT you are bound to" : "human operator"} (conversational — answer directly and briefly IN TEXT after any tool use; this is not a tick, no verdict line): ${text}`,
       );
+      // Last NON-EMPTY assistant text produced by THIS exchange — a message
+      // that only carries a tool call must not shadow the actual answer
+      // (sprint-1 producer caught exactly that).
       const msgs: any[] = peer.session.state?.messages ?? [];
-      for (let i = msgs.length - 1; i >= 0; i--) {
+      for (let i = msgs.length - 1; i >= Math.min(before, msgs.length - 1); i--) {
         if (msgs[i]?.role === "assistant") {
-          reply = textOfBlocks(msgs[i].content);
-          break;
+          const t = textOfBlocks(msgs[i].content).trim();
+          if (t) {
+            reply = t;
+            break;
+          }
         }
       }
       appendEvent(this.ctx?.cwd ?? process.cwd(), "talk.replied", { peer: name, from, chars: reply.length });
