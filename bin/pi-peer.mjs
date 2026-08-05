@@ -110,7 +110,7 @@ usage: pi-peer [--cwd <dir>] <command>
 
   list                                     crew overview (no live session needed)
   findings [name]                          delivered findings from the ledger (no session needed)
-  launch <role> <task…> [--tick <min>] [--context fork|compacted|fresh]
+  launch <role> <task…> [--tick <min>] [--context fork|compacted|fresh] [--watch <dir>]
   talk <name> <message…>                   send a message, print the peer's reply
   retask <name> <task…> [--tick <min>]
   tick <name> <minutes>                    change a peer's interval
@@ -154,9 +154,10 @@ async function main() {
       const role = argv.shift() ?? fail("launch needs a role — see the roles section of /peers list");
       const tick = takeFlag("--tick");
       const context = takeFlag("--context");
+      const watch = takeFlag("--watch");
       const task = argv.join(" ").trim();
       if (!task) fail("launch needs a task");
-      await run({ action: "launch", role, task, tickMinutes: tick ? Number(tick) : undefined, context });
+      await run({ action: "launch", role, task, tickMinutes: tick ? Number(tick) : undefined, context, watchCwd: watch ? path.resolve(watch) : undefined });
       return;
     }
     case "talk": {

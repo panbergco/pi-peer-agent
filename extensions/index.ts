@@ -140,16 +140,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               }
               // Support --tick <min> anywhere in the task words.
               let tickOverride: number | undefined;
+              let watchDir: string | undefined;
               const words = task.split(/\s+/).filter((w, i, arr) => {
-                if (w === "--tick") return false;
+                if (w === "--tick" || w === "--watch") return false;
                 if (arr[i - 1] === "--tick") {
                   tickOverride = parseTick(w);
+                  return false;
+                }
+                if (arr[i - 1] === "--watch") {
+                  watchDir = path.resolve((lastCtx ?? ctx).cwd, w);
                   return false;
                 }
                 return true;
               });
               const effRole = tickOverride ? { ...role, tick: tickOverride } : role;
-              void manager.launch(lastCtx ?? ctx, effRole, words.join(" ")).then(() => tui.requestRender());
+              void manager.launch(lastCtx ?? ctx, effRole, words.join(" "), undefined, undefined, watchDir).then(() => tui.requestRender());
             },
             onTalk: (name: string, text: string) => {
               void manager.talk(name, text, "operator").then((res) => {
@@ -310,18 +315,24 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       }
 
       if (verb === "launch") {
+        // --watch <dir> anywhere in the args roots the peer's file tools there (E1).
         const roles = discoverRoles(ctx.cwd);
         let taskWords = rest.slice(1);
         let mode: any;
         let tickOverride: number | undefined;
+        let watchCwd: string | undefined;
         taskWords = taskWords.filter((w, i, arr) => {
           if (w === "--fork" || w === "--compacted" || w === "--fresh") {
             mode = w.slice(2);
             return false;
           }
-          if (w === "--tick") return false;
+          if (w === "--tick" || w === "--watch") return false;
           if (arr[i - 1] === "--tick") {
             tickOverride = parseTick(w); // minutes by default: --tick 15 = 15m
+            return false;
+          }
+          if (arr[i - 1] === "--watch") {
+            watchCwd = path.resolve(ctx.cwd, w);
             return false;
           }
           return true;
@@ -339,8 +350,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         if (!task && ui?.input) task = (await ui.input("Standing task for this peer", role.description)) ?? "";
         if (!task) task = role.description || "watch the main agent's work per your charter";
         const effRole = tickOverride ? { ...role, tick: tickOverride } : role;
-        const peer = await manager.launch(ctx, effRole, task, mode);
-        ui?.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(effRole.tick / 60)}m) — ${peer.sessionId}`, "info");
+        const peer = await manager.launch(ctx, effRole, task, mode, undefined, watchCwd);
+        ui?.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(effRole.tick / 60)}m${watchCwd ? `, watching ${watchCwd}` : ""}) — ${peer.sessionId}`, "info");
         if (!sidecar) void openSidecar(ctx);
         return;
       }
@@ -438,6 +449,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       task: Type.String({ description: "The standing task, e.g. 'watch for scope creep vs the mission'." }),
       context: Type.Optional(Type.String({ description: "fork | compacted | fresh (default: role's choice)" })),
       tickMinutes: Type.Optional(Type.Number({ description: "Override this peer's tick interval in MINUTES (min 1). Each peer has its own. The framework issues ticks; the peer itself can never change this." })),
+      cwd: Type.Optional(Type.String({ description: "Watch directory: root the peer's read-only file tools at this path (e.g. an executor worktree) instead of the project root." })),
     }),
     async execute(_id: string, params: any, _signal: unknown, _u: unknown, ctx: any) {
       track(ctx);
@@ -682,7 +694,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const role = discoverRoles(ctx.cwd).find((r) => r.name === cmd.role);
         if (!role) return { ok: false, message: `unknown role "${cmd.role}"` };
         const eff = cmd.tickMinutes ? { ...role, tick: Math.max(60, Math.floor(cmd.tickMinutes * 60)) } : role;
-        const peer = await manager.launch(ctx, eff, String(cmd.task ?? role.description), cmd.context);
+        const peer = await manager.launch(ctx, eff, String(cmd.task ?? role.description), cmd.context, undefined, cmd.watchCwd ? path.resolve(ctx.cwd, String(cmd.watchCwd)) : undefined);
         return { ok: true, message: `${peer.name} launched (${peer.contextMode}, tick ${Math.round(eff.tick / 60)}m) · resume: pi --session ${peer.sessionFile}` };
       }
       case "talk": {

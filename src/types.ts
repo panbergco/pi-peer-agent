@@ -91,6 +91,8 @@ export interface RosterEntry {
   tickBaseS: number;
   status: PeerStatus;
   startedAt: string;
+  /** Watch directory (E1): peer file tools rooted here when set. */
+  watchCwd?: string;
 }
 
 /** Simple monotonic-ish unique id (time + random) — ledger/envelope ids. */

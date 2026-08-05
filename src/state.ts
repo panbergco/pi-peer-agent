@@ -1,6 +1,6 @@
 /** Durable state — ledger (JSONL), roster.json, AGENTS.md managed block (spec §4.3, §11).
  *
- * PISG discipline throughout: write-intent before action, append-only events,
+ * Discipline throughout: write-intent before action, append-only events,
  * atomic roster rewrites, idempotent markered block that never touches content
  * outside its own span.
  */
@@ -61,7 +61,7 @@ export function loadConfig(): PeerConfig {
 }
 
 // ---------------------------------------------------------------------------
-// AGENTS.md managed block (PISG agents-block.ts pattern, own markers/version)
+// AGENTS.md managed block (idempotent markered span, own version)
 // ---------------------------------------------------------------------------
 
 export const BLOCK_START = "<!-- peer-agent:start -->";

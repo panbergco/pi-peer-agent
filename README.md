@@ -161,7 +161,7 @@ package installed.
 ## Spec
 
 Full design — identity/binding (MACP addressing), tick engine, delivery mapping,
-transports, PISG integration plan — in [docs/peer-agent-spec.md](docs/peer-agent-spec.md).
+transports, external-orchestrator integration plan — in [docs/peer-agent-spec.md](docs/peer-agent-spec.md).
 
 ## Credits
 

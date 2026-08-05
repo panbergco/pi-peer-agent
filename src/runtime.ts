@@ -33,6 +33,8 @@ export interface Peer {
   pendingRetask: string | null;
   /** Delivery receipts queued for the peer's next tick prompt. */
   pendingReceipts: string[];
+  /** Watch directory: file tools rooted here when set (E1, spec 12.1). */
+  watchCwd?: string;
   unsub: (() => void) | null;
   startedAt: string;
 }
@@ -214,6 +216,7 @@ export class PeerManager {
       tickBaseS: p.role.tick,
       status: p.status,
       startedAt: p.startedAt,
+      ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
     writeRoster(cwd, entries);
   }
@@ -244,6 +247,7 @@ export class PeerManager {
     parentId: string,
     sm: any,
     wantedModel?: string,
+    watchCwd?: string,
   ): Promise<{ session: any; model: any }> {
     const mod: any = await import("@earendil-works/pi-coding-agent");
     // Bare resource loader (btw-sidecar pattern): a peer session loads NO
@@ -256,6 +260,9 @@ export class PeerManager {
       role.charter,
       "",
       `You have read-only tools (${role.tools.join(", ")}) — inspect the repository to verify suspicions before reporting. You cannot modify anything.`,
+      ...(watchCwd && watchCwd !== cwd
+        ? ["", `Your file tools are rooted at ${watchCwd} (your WATCH DIRECTORY) — relative paths resolve there, not at the main project root.`]
+        : []),
       "",
       PROTOCOL,
     ].join("\n");
@@ -280,9 +287,10 @@ export class PeerManager {
       const [prov, ...rest] = wantedModel.split("/");
       model = (ctx as any).modelRegistry?.find?.(prov, rest.join("/")) ?? model;
     }
-    const readOnly: any[] = mod.createReadOnlyTools(cwd).filter((t: any) => role.tools.includes(t.name));
+    const toolsCwd = watchCwd ?? cwd;
+    const readOnly: any[] = mod.createReadOnlyTools(toolsCwd).filter((t: any) => role.tools.includes(t.name));
     const { session } = await mod.createAgentSession({
-      cwd,
+      cwd: toolsCwd,
       sessionManager: sm,
       model,
       modelRegistry: (ctx as any).modelRegistry,
@@ -361,6 +369,7 @@ export class PeerManager {
         const { session, model } = await this.assemblePeerSession(
           ctx, cwd, role, entry.name, entry.address, parentId, sm,
           entry.model && entry.model !== "default" ? entry.model : undefined,
+          entry.watchCwd,
         );
         const peer: Peer = {
           name: entry.name, role, task: entry.task, contextMode: entry.contextMode,
@@ -373,6 +382,7 @@ export class PeerManager {
           watermark: ((ctx as any).sessionManager?.getEntries?.() ?? []).length,
           pane: [], findings: [], pendingRetask: null, pendingReceipts: [], unsub: null,
           startedAt: entry.startedAt,
+          ...(entry.watchCwd ? { watchCwd: entry.watchCwd } : {}),
         };
         // Callsign counter continuity (sentinel-2 must not collide).
         const suffix = Number.parseInt(entry.name.split("-").pop() ?? "", 10);
@@ -434,9 +444,13 @@ export class PeerManager {
     }
   }
 
-  async launch(ctx: ExtensionContext, role: PeerRole, task: string, mode?: ContextMode, modelRef?: string): Promise<Peer> {
+  async launch(ctx: ExtensionContext, role: PeerRole, task: string, mode?: ContextMode, modelRef?: string, watchCwd?: string): Promise<Peer> {
     this.ctx = ctx;
     const cwd = ctx.cwd;
+    if (watchCwd) {
+      const fsm = await import("node:fs");
+      if (!fsm.existsSync(watchCwd)) throw new Error(`watch directory does not exist: ${watchCwd}`);
+    }
     if (this.active.length >= this.config.maxPeers) {
       ctx.ui?.notify?.(`peer cap (${this.config.maxPeers}) reached — launching anyway (soft cap)`, "warning");
     }
@@ -449,6 +463,7 @@ export class PeerManager {
     appendEvent(cwd, "peer.spawned", {
       peer: name, role: role.name, address, parentSessionId: parentId,
       contextMode, task, model: modelRef ?? role.model ?? "parent", tickBaseS: role.tick,
+      ...(watchCwd ? { watchCwd } : {}),
     });
 
     const mod: any = await import("@earendil-works/pi-coding-agent");
@@ -461,12 +476,13 @@ export class PeerManager {
       contextMode === "fork" && parentFile
         ? mod.SessionManager.forkFrom(parentFile, cwd, peerSessionDir)
         : mod.SessionManager.create(cwd, peerSessionDir);
-    const { session, model } = await this.assemblePeerSession(ctx, cwd, role, name, address, parentId, sm, modelRef ?? role.model);
+    const { session, model } = await this.assemblePeerSession(ctx, cwd, role, name, address, parentId, sm, modelRef ?? role.model, watchCwd);
 
     const peer: Peer = {
       name, role, task, contextMode,
       modelLabel: model ? `${model.provider}/${model.id}` : "default",
       address, session,
+      ...(watchCwd ? { watchCwd } : {}),
       sessionId: sm.getSessionId?.() ?? "unknown",
       sessionFile: sm.getSessionFile?.() ?? "(in-memory)",
       status: "starting", tickCount: 0, quietStreak: 0, backoffIdx: 0,
