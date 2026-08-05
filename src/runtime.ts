@@ -31,6 +31,8 @@ export interface Peer {
   pane: PaneEntry[];
   findings: Finding[];
   pendingRetask: string | null;
+  /** Delivery receipts queued for the peer's next tick prompt. */
+  pendingReceipts: string[];
   unsub: (() => void) | null;
   startedAt: string;
 }
@@ -95,7 +97,8 @@ operator or the main agent ends your watch.
 DIRECT MESSAGES: replies stay private between you and the sender UNLESS you end the reply with a
 FINDING[...] line — that is your ONLY way to push something to the main agent on demand (e.g. when
 asked to relay or alert). You have no other relay mechanism; never claim to have delivered anything
-without emitting that line.`;
+without emitting that line. Delivery receipts for your findings arrive in your next tick prompt;
+you can also verify any delivery yourself in .pi/peer-agent/events.jsonl (finding.delivered).`;
 
 export class PeerManager {
   peers = new Map<string, Peer>();
@@ -368,7 +371,7 @@ export class PeerManager {
           status: "waiting", tickCount: 0, quietStreak: 0, backoffIdx: 0,
           nextTickAt: Date.now(), timer: null, busy: false,
           watermark: ((ctx as any).sessionManager?.getEntries?.() ?? []).length,
-          pane: [], findings: [], pendingRetask: null, unsub: null,
+          pane: [], findings: [], pendingRetask: null, pendingReceipts: [], unsub: null,
           startedAt: entry.startedAt,
         };
         // Callsign counter continuity (sentinel-2 must not collide).
@@ -469,7 +472,7 @@ export class PeerManager {
       status: "starting", tickCount: 0, quietStreak: 0, backoffIdx: 0,
       nextTickAt: Date.now(), timer: null, busy: false,
       watermark: ((ctx as any).sessionManager?.getEntries?.() ?? []).length,
-      pane: [], findings: [], pendingRetask: null, unsub: null,
+      pane: [], findings: [], pendingRetask: null, pendingReceipts: [], unsub: null,
       startedAt: new Date().toISOString(),
     };
     // In fork mode the peer has the full lineage; watch from now. In other
@@ -579,6 +582,10 @@ export class PeerManager {
       parts.push(`TICK ${peer.tickCount}. Task unchanged: ${peer.task}`);
     }
     if (retask) parts.push(`RETASK from the main agent: ${retask}`);
+    if (peer.pendingReceipts.length > 0) {
+      parts.push(`DELIVERY RECEIPTS since your last tick:\n${peer.pendingReceipts.join("\n")}`);
+      peer.pendingReceipts = [];
+    }
     parts.push(delta ? `DELTA — what the main agent did since your last look:\n${delta}` : `No conversation delta this tick.`);
     parts.push(`End with your verdict line (QUIET or FINDING[…]: …).`);
 
@@ -629,7 +636,12 @@ export class PeerManager {
     return `agent://pi/${this.parentSessionId()}`;
   }
 
-  private handleVerdict(peer: Peer, text: string, cwd: string, ceilingOverride?: Priority): void {
+  private handleVerdict(
+    peer: Peer,
+    text: string,
+    cwd: string,
+    authority?: { ceiling?: Priority; floor?: Priority },
+  ): void {
     const m = this.parseVerdict(text);
     if (!m) {
       peer.quietStreak++;
@@ -643,10 +655,13 @@ export class PeerManager {
       peer.backoffIdx = Math.min(peer.backoffIdx + 1, this.config.backoff.length - 1);
       return;
     }
-    const ceiling = ceilingOverride ?? peer.role.priorityCeiling;
+    const ceiling = authority?.ceiling ?? peer.role.priorityCeiling;
     const requested = (m[2] ?? "info") as Priority;
     const clamped = priorityRank(requested) > priorityRank(ceiling);
-    const priority: Priority = clamped ? ceiling : requested;
+    let priority: Priority = clamped ? ceiling : requested;
+    // Operator-relay floor: "tell the main agent X" means deliver NOW — an
+    // info-priority relay would sit silently until the next natural turn.
+    if (authority?.floor && priorityRank(priority) < priorityRank(authority.floor)) priority = authority.floor;
     const body = (m[3] ?? "").trim().slice(0, 4000);
     if (!body) return;
 
@@ -674,6 +689,10 @@ export class PeerManager {
         this.pi.sendMessage({ customType: "peer-finding", content, display: true }, { deliverAs: "nextTurn" });
       }
       appendEvent(cwd, "finding.delivered", { peer: peer.name, id: finding.id, priority: finding.priority, clamped: finding.clamped, tick: finding.tick, body: finding.body.slice(0, 2000) });
+      // Delivery receipt: the peer learns on its next tick that this landed
+      // (its own suggestion — relayed through the very channel it improves).
+      peer.pendingReceipts.push(`finding ${finding.id} (${finding.priority}) delivered to the main agent at ${new Date().toISOString()}`);
+      peer.pane.push({ kind: "note", text: `✓ delivered to main agent (${finding.priority})` });
     } catch (err) {
       appendEvent(cwd, "finding.failed", { peer: peer.name, id: finding.id, error: String(err).slice(0, 200) });
     }
@@ -748,8 +767,8 @@ export class PeerManager {
       // ceiling role (interrupt stays tick-only).
       const v = this.parseVerdict(reply);
       if (v && !v[1]!.trim().startsWith("QUIET")) {
-        const override: Priority | undefined = from === "operator" ? ("steering" as Priority) : undefined;
-        this.handleVerdict(peer, reply, this.ctx?.cwd ?? process.cwd(), override);
+        const authority = from === "operator" ? { ceiling: "steering" as Priority, floor: "steering" as Priority } : undefined;
+        this.handleVerdict(peer, reply, this.ctx?.cwd ?? process.cwd(), authority);
       }
     } catch (err) {
       peer.pane.push({ kind: "note", text: `error: ${String(err).slice(0, 120)}` });
