@@ -363,6 +363,192 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     },
   });
 
+  // ------------------------------------------------------- maturity + modes
+  //
+  // Scorecard-mode dispatch on peer-docs/.active-scorecard (one source of
+  // truth, three modes):
+  //   maturity  — pointer absent or "maturity-model.md"      → KPI: PMI
+  //   usecase   — pointer into uc-journey-models/            → KPI: UCMI(UCnn)
+  //   custom    — pointer at roadmap doc(s); multi-line = arc chain, first
+  //               non-closed arc active                      → KPI: Q/C/I pillars
+  // Loop machinery is byte-identical across modes — only rubric + KPI label
+  // differ. The heavy lifting (construction, scoring) is done by the bundled
+  // maturity-architect / maturity-assessor roles; this command is the thin
+  // mechanical dispatch: pointer read/write + arm-time validation.
+
+  const REQUIRED_ROADMAP_HEADINGS = ["## Strategic intent map", "## Sprint queue", "## Stop condition"];
+
+  const peerDocs = (cwd: string) => path.join(cwd, "peer-docs");
+  const pointerPath = (cwd: string) => path.join(peerDocs(cwd), ".active-scorecard");
+
+  function readPointer(cwd: string): string[] {
+    try {
+      return fs
+        .readFileSync(pointerPath(cwd), "utf8")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  function scorecardMode(lines: string[]): "maturity" | "usecase" | "custom" {
+    if (lines.length === 0 || (lines.length === 1 && lines[0] === "maturity-model.md")) return "maturity";
+    if (lines.length === 1 && lines[0]!.includes("uc-journey-models/")) return "usecase";
+    return "custom";
+  }
+
+  function validateRoadmap(cwd: string, rel: string): string[] {
+    const missing: string[] = [];
+    const abs = path.isAbsolute(rel) ? rel : path.join(cwd, rel);
+    let text = "";
+    try {
+      text = fs.readFileSync(abs, "utf8");
+    } catch {
+      return [`file not found: ${rel}`];
+    }
+    for (const h of REQUIRED_ROADMAP_HEADINGS) if (!text.includes(h)) missing.push(`${rel}: missing "${h}"`);
+    return missing;
+  }
+
+  function latestSnapshot(cwd: string): { file: string; kpiLine: string } | null {
+    const dir = path.join(peerDocs(cwd), "assessments");
+    let files: string[] = [];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+    } catch {
+      return null;
+    }
+    const last = files.at(-1);
+    if (!last) return null;
+    let kpiLine = "";
+    try {
+      const text = fs.readFileSync(path.join(dir, last), "utf8");
+      kpiLine =
+        text.split("\n").find((l) => /\b(PMI|UCMI)\b.*\d/.test(l) || /Quality avg/.test(l))?.trim() ?? "";
+    } catch {
+      /* unreadable snapshot — show the filename alone */
+    }
+    return { file: last, kpiLine };
+  }
+
+  async function launchMaturityRole(ctx: ExtensionContext, roleName: string, task: string): Promise<void> {
+    const ui: any = ctx.ui;
+    const role = discoverRoles(ctx.cwd).find((r) => r.name === roleName);
+    if (!role) {
+      ui?.notify?.(`bundled role "${roleName}" not found — reinstall the package`, "error");
+      return;
+    }
+    const peer = await manager.launch(ctx, role, task);
+    ui?.notify?.(`${peer.name} launched (${roleName}) — findings land here; /peers shows progress`, "info");
+    if (!sidecar) void openSidecar(ctx);
+  }
+
+  pi.registerCommand("maturity", {
+    description:
+      "maturity model + modes: (bare = status) | mode maturity | mode usecase <NN> | mode custom <roadmap.md…> | build | snapshot",
+    handler: async (args: unknown, ctx: ExtensionContext) => {
+      track(ctx);
+      const ui: any = ctx.ui;
+      const argv = String(args ?? "").trim();
+      const [verb, ...rest] = argv.split(/\s+/).filter(Boolean);
+
+      if (!verb || verb === "status") {
+        const lines = readPointer(ctx.cwd);
+        const mode = scorecardMode(lines);
+        const out: string[] = [`mode: <${mode}>`];
+        if (mode === "maturity") {
+          const has = fs.existsSync(path.join(peerDocs(ctx.cwd), "maturity-model.md"));
+          out.push(`scorecard: peer-docs/maturity-model.md ${has ? "" : "(MISSING — run /maturity build)"}`);
+        } else if (mode === "usecase") {
+          out.push(`scorecard: ${lines[0]} ${fs.existsSync(path.join(ctx.cwd, lines[0]!)) ? "" : "(MISSING)"}`);
+        } else {
+          out.push(`arc chain (${lines.length}):`);
+          for (const l of lines) out.push(`  ${l} ${validateRoadmap(ctx.cwd, l).length === 0 ? "✓" : "⚠ malformed"}`);
+        }
+        const snap = latestSnapshot(ctx.cwd);
+        out.push(snap ? `latest snapshot: ${snap.file}${snap.kpiLine ? ` · ${snap.kpiLine}` : ""}` : "latest snapshot: none");
+        out.push("usage: /maturity mode maturity|usecase <NN>|custom <roadmap…> · /maturity build · /maturity snapshot");
+        ui?.notify?.(out.join("\n"), "info");
+        return;
+      }
+
+      if (verb === "mode") {
+        const target = rest[0];
+        fs.mkdirSync(peerDocs(ctx.cwd), { recursive: true });
+        if (target === "maturity") {
+          fs.writeFileSync(pointerPath(ctx.cwd), "maturity-model.md\n", "utf8");
+          const has = fs.existsSync(path.join(peerDocs(ctx.cwd), "maturity-model.md"));
+          ui?.notify?.(`mode <maturity> armed (KPI: PMI)${has ? "" : " — no blueprint yet: run /maturity build"}`, "info");
+          return;
+        }
+        if (target === "usecase") {
+          const nn = (rest[1] ?? "").replace(/^uc/i, "").padStart(2, "0");
+          if (!/^\d{2}$/.test(nn)) {
+            ui?.notify?.("usage: /maturity mode usecase <NN>", "error");
+            return;
+          }
+          const rel = `peer-docs/uc-journey-models/uc${nn}-journey-model.md`;
+          fs.writeFileSync(pointerPath(ctx.cwd), rel + "\n", "utf8");
+          const has = fs.existsSync(path.join(ctx.cwd, rel));
+          ui?.notify?.(
+            `mode <usecase> armed for UC${nn} (KPI: UCMI(UC${nn}))${has ? "" : ` — ${rel} missing: copy the bundled uc-journey-model template, then /maturity snapshot`}`,
+            has ? "info" : "warning",
+          );
+          return;
+        }
+        if (target === "custom") {
+          const paths = rest.slice(1);
+          if (paths.length === 0) {
+            ui?.notify?.("usage: /maturity mode custom <roadmap.md> [<roadmap2.md> …] (multi-path = arc chain, declared order)", "error");
+            return;
+          }
+          const problems = paths.flatMap((p) => validateRoadmap(ctx.cwd, p));
+          if (problems.length > 0) {
+            ui?.notify?.(
+              `refusing to arm <custom> — repair first:\n  ${problems.join("\n  ")}\n(every roadmap needs the three H2 headings: ${REQUIRED_ROADMAP_HEADINGS.join(" · ")})`,
+              "error",
+            );
+            return;
+          }
+          fs.writeFileSync(pointerPath(ctx.cwd), paths.join("\n") + "\n", "utf8");
+          ui?.notify?.(
+            `mode <custom> armed — ${paths.length === 1 ? paths[0] : `arc chain of ${paths.length} (first non-closed arc is active)`} (KPIs: Quality/Completeness/Integration; cite arc-slice IDs, never "rows")`,
+            "info",
+          );
+          return;
+        }
+        ui?.notify?.("usage: /maturity mode maturity | usecase <NN> | custom <roadmap…>", "error");
+        return;
+      }
+
+      if (verb === "build") {
+        const extra = rest.join(" ");
+        await launchMaturityRole(
+          ctx,
+          "maturity-architect",
+          extra ||
+            "Construct peer-docs/maturity-model.md for this project per your four phases: roll up every spec/strategy doc, specialize the bundled universal blueprint, look beyond the spec (archetype-gap walk, competitive research, buyer's gauntlet, failure modes, provenance tags, self-flagged vague anchors), then surface for sign-off and write.",
+        );
+        return;
+      }
+
+      if (verb === "snapshot") {
+        const extra = rest.join(" ");
+        await launchMaturityRole(
+          ctx,
+          "maturity-assessor",
+          extra ||
+            "Produce one dated snapshot now against the ACTIVE scorecard (read peer-docs/.active-scorecard for mode dispatch), then keep standing watch per your charter.",
+        );
+        return;
+      }
+
+      ui?.notify?.(`unknown verb "${verb}" — /maturity for usage`, "error");
+    },
+  });
+
   pi.registerShortcut(config.toggleKey as any, {
     description: "peers panel: show/hide",
     handler: (ctx: ExtensionContext) => {

@@ -72,3 +72,25 @@ reach you.
   applied by the live session within ~5s — queued commands survive restarts.
 - State/receipts: `.pi/peer-agent/roster.json` (crew map) and `events.jsonl` (ledger:
   every tick, finding with body, suspend/recover, control ack).
+
+## Maturity model + modes (`/maturity`)
+
+The package bundles a maturity-tracking subsystem (full doc: `docs/maturity-and-modes.md`):
+
+- **One pointer, three modes** — `peer-docs/.active-scorecard` dispatches
+  `<maturity>` (default; rubric `peer-docs/maturity-model.md`, KPI **PMI** 0-100),
+  `<usecase>` (pointer into `peer-docs/uc-journey-models/`, KPI **UCMI(UC<NN>)**), or
+  `<custom>` (pointer at roadmap doc(s); multi-line = chained arcs, first non-closed
+  active; KPIs Quality avg / Completeness % / Integration; cite arc-slice IDs).
+  Machinery identical across modes; vocabularies never mix.
+- **Commands** — `/maturity` (status) · `/maturity mode maturity|usecase <NN>|custom
+  <roadmap…>` (arming validates roadmaps: three required H2 headings, refuses with a
+  repair list) · `/maturity build` (launch **maturity-architect**: rolls up every
+  spec doc automatically, specializes the bundled 5-pillar blueprint, then looks
+  BEYOND the spec — archetype-gap walk, competitive research, buyer's gauntlet,
+  provenance tags, proxy-gap-tested targets) · `/maturity snapshot` (launch
+  **maturity-assessor**: dated append-only snapshot, evidence-cited, mode-aware).
+- **Discipline lives in the templates** — `templates/maturity-blueprint-template.md`
+  carries the seven scoring rules (three-class evidence, stakeholder-lowest,
+  multi-leaf ceiling, honesty-drop…); snapshots go to `peer-docs/assessments/`,
+  never overwritten.
