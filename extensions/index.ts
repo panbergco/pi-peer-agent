@@ -120,28 +120,25 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   // ------------------------------------------------------------- commands
 
-  pi.registerCommand("peers", {
-    description: "toggle the peer sidecar (also ctrl+alt+p)",
-    handler: async (_args: unknown, ctx: ExtensionContext) => {
-      track(ctx);
-      toggleSidecar(ctx);
-    },
-  });
-
   pi.registerCommand("peer", {
-    description: "manage peers: launch <role> <task> | stop <name|all> | retask <name> <task> | broadcast <text> | list",
+    description: "peers: (bare = toggle sidecar) | launch <role> <task> | stop <name|all> | retask <name> <task> | broadcast <text> | list",
     handler: async (args: unknown, ctx: ExtensionContext) => {
       track(ctx);
       const ui: any = ctx.ui;
       const argv = String(args ?? "").trim();
       const [verb, ...rest] = argv.split(/\s+/).filter(Boolean);
 
-      if (!verb || verb === "list") {
+      if (!verb) {
+        toggleSidecar(ctx);
+        return;
+      }
+
+      if (verb === "list") {
         const roles = discoverRoles(ctx.cwd);
         const lines = [
           `roles: ${roles.map((r) => `${r.name} (${r.source}, tick ${r.tick}s, ≤${r.priorityCeiling})`).join(" · ") || "none found"}`,
           `active: ${manager.active.map((p) => `${p.name}[t${p.tickCount}${p.findings.length ? ` ◆${p.findings.length}` : ""}]`).join(" · ") || "none"}`,
-          `usage: /peer launch <role> <task…> [--fork|--compacted|--fresh] · /peer stop <name|all> · /peer retask <name> <task…> · /peer broadcast <text…>`,
+          `usage: /peer (toggle sidecar) · /peer launch <role> <task…> [--fork|--compacted|--fresh] · /peer stop <name|all> · /peer retask <name> <task…> · /peer broadcast <text…>`,
         ];
         ui?.notify?.(lines.join("\n"), "info");
         return;

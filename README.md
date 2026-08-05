@@ -49,7 +49,7 @@ Or per-project in `.pi/settings.json`:
 - `/peer launch <role> <task…>` (`--fork|--compacted|--fresh` to pick the context
   recipe) · `/peer stop <name|all>` · `/peer retask <name> <task…>` ·
   `/peer broadcast <text…>` · `/peer list`
-- `/peers` or `Ctrl+Alt+P` — the sidecar: a centered overlay listing every peer;
+- `/peer` (bare) or `Ctrl+Alt+P` — the sidecar: a centered overlay listing every peer;
   `↑/↓` pick, `Enter` expand/collapse individually, wheel/`PgUp/PgDn` scroll the live
   pane, `i` insert the latest finding into your prompt, `y`/`Y` yank finding/pane
   (OSC 52), `r` yank the ready-to-run resume command, `x` stop, `Esc` back, `q` hide.

@@ -123,7 +123,7 @@ export class PeerSidecar {
     };
 
     if (peers.length === 0) {
-      row(fg(t, "dim", "  no peers yet — /peer launch <role> <task>"));
+      row(fg(t, "dim", "  no peers yet — /peer launch <role> <task…>"));
     }
 
     peers.forEach((peer, i) => {
@@ -162,7 +162,7 @@ export class PeerSidecar {
     out.push(bar("├" + "─".repeat(inner) + "┤"));
     const hints = this.focused
       ? " ↑↓ pick · ⏎ open/close · PgUp/PgDn scroll · i insert · y/Y yank · r resume · x stop · q hide · esc back "
-      : " ctrl+alt+p focus · /peers ";
+      : " ctrl+alt+p focus · /peer ";
     row(fg(t, "dim", truncateToWidth(hints, inner)));
     out.push(bar("╰" + "─".repeat(inner) + "╯"));
     return out;
