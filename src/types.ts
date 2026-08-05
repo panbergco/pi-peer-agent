@@ -2,7 +2,7 @@
 
 export type Priority = "info" | "steering" | "interrupt";
 export type ContextMode = "fork" | "compacted" | "fresh";
-export type PeerStatus = "starting" | "waiting" | "thinking" | "error" | "stopped";
+export type PeerStatus = "starting" | "waiting" | "thinking" | "error" | "stopped" | "suspended";
 
 export const PRIORITY_ORDER: Priority[] = ["info", "steering", "interrupt"];
 

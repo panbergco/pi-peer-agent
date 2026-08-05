@@ -530,7 +530,17 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   // ---------------------------------------------------------------- events
 
-  pi.on("session_start", (_e: unknown, ctx: ExtensionContext) => track(ctx));
+  pi.on("session_start", async (_e: unknown, ctx: ExtensionContext) => {
+    track(ctx);
+    // Recover this session's suspended crew (restart/resume/reload) — peers
+    // are part of the session and come back with it, memory intact.
+    try {
+      const n = await manager.recover(ctx);
+      if (n > 0) ctx.ui?.notify?.(`${n} peer${n > 1 ? "s" : ""} recovered — watch continues`, "info");
+    } catch {
+      /* recovery must never block session start */
+    }
+  });
   pi.on("turn_start", (_e: unknown, ctx: ExtensionContext) => track(ctx));
   pi.on("turn_end", (_e: unknown, ctx: ExtensionContext) => track(ctx));
   pi.on("session_shutdown", async () => {
@@ -542,6 +552,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       /* already gone */
     }
     sidecar = null;
-    await manager.stopAll();
+    // Suspend, don't stop: the crew is part of the session and recovers
+    // with it (roster.json keeps them as 'suspended').
+    await manager.suspendAll();
   });
 }

@@ -208,6 +208,183 @@ export class PeerManager {
     writeRoster(cwd, entries);
   }
 
+  /** Where peer session files live: <default sessions dir>/peer-agent/. */
+  private async peerSessionDir(cwd: string): Promise<string | undefined> {
+    try {
+      const path = await import("node:path");
+      const parentFile = this.parentSessionFile();
+      if (parentFile) return path.join(path.dirname(parentFile), "peer-agent");
+      const { SessionManager }: any = await import("@earendil-works/pi-coding-agent");
+      const probe = SessionManager.create(cwd);
+      const f = probe?.getSessionFile?.();
+      return f ? (await import("node:path")).join((await import("node:path")).dirname(f), "peer-agent") : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Shared session assembly for launch AND recovery: charter-as-system-
+   *  prompt, provider-extensions-only loader, read-only tools. */
+  private async assemblePeerSession(
+    ctx: ExtensionContext,
+    cwd: string,
+    role: PeerRole,
+    name: string,
+    address: string,
+    parentId: string,
+    sm: any,
+    wantedModel?: string,
+  ): Promise<{ session: any; model: any }> {
+    const mod: any = await import("@earendil-works/pi-coding-agent");
+    // Bare resource loader (btw-sidecar pattern): a peer session loads NO
+    // ambient extensions/skills/agents-files — it is a monitor, not a second
+    // operator cockpit — and its system prompt IS the role charter.
+    const systemPrompt = [
+      `You are ${name}, a resident PEER MONITOR (role: ${role.name}) bound to a main pi agent session (agent://pi/${parentId}).`,
+      `Your address: ${address}. The roster of sibling peers lives at .pi/peer-agent/roster.json.`,
+      "",
+      role.charter,
+      "",
+      `You have read-only tools (${role.tools.join(", ")}) — inspect the repository to verify suspicions before reporting. You cannot modify anything.`,
+      "",
+      PROTOCOL,
+    ].join("\n");
+    const providerExts = await this.loadProviderExtensions(cwd);
+    const resourceLoader = {
+      getExtensions: () => ({
+        extensions: providerExts?.extensions ?? [],
+        errors: [],
+        runtime: providerExts?.runtime ?? mod.createExtensionRuntime(),
+      }),
+      getSkills: () => ({ skills: [], diagnostics: [] }),
+      getPrompts: () => ({ prompts: [], diagnostics: [] }),
+      getThemes: () => ({ themes: [], diagnostics: [] }),
+      getAgentsFiles: () => ({ agentsFiles: [] }),
+      getSystemPrompt: () => systemPrompt,
+      getAppendSystemPrompt: () => [],
+      extendResources: () => {},
+      reload: async () => {},
+    };
+    let model: any = (ctx as any).model;
+    if (wantedModel) {
+      const [prov, ...rest] = wantedModel.split("/");
+      model = (ctx as any).modelRegistry?.find?.(prov, rest.join("/")) ?? model;
+    }
+    const readOnly: any[] = mod.createReadOnlyTools(cwd).filter((t: any) => role.tools.includes(t.name));
+    const { session } = await mod.createAgentSession({
+      cwd,
+      sessionManager: sm,
+      model,
+      modelRegistry: (ctx as any).modelRegistry,
+      thinkingLevel: role.thinking ?? "low",
+      noTools: "all",
+      customTools: readOnly,
+      resourceLoader,
+    });
+    return { session, model };
+  }
+
+  /** Session teardown that PRESERVES the crew in roster.json as 'suspended'
+   *  — peers are part of the session and come back on recover(). */
+  async suspendAll(): Promise<void> {
+    const cwd = this.ctx?.cwd ?? process.cwd();
+    const entries: RosterEntry[] = this.active.map((p) => ({
+      name: p.name,
+      role: p.role.name,
+      address: p.address,
+      peerSessionId: p.sessionId,
+      peerSessionFile: p.sessionFile,
+      parentSessionId: this.parentSessionId(),
+      task: p.task,
+      contextMode: p.contextMode,
+      model: p.modelLabel,
+      tickBaseS: p.role.tick,
+      status: "suspended" as PeerStatus,
+      startedAt: p.startedAt,
+    }));
+    if (entries.length > 0) writeRoster(cwd, entries);
+    for (const p of [...this.peers.values()]) {
+      if (p.status === "stopped") continue;
+      p.status = "stopped";
+      if (p.timer) clearTimeout(p.timer);
+      p.timer = null;
+      try {
+        p.unsub?.();
+        p.session.dispose?.();
+      } catch {
+        /* best-effort */
+      }
+      appendEvent(cwd, "peer.suspended", { peer: p.name, ticks: p.tickCount, findings: p.findings.length });
+    }
+    this.peers.clear();
+  }
+
+  /** Revive this session's suspended crew from roster.json — each peer
+   *  resumes its OWN session file with full memory. */
+  async recover(ctx: ExtensionContext): Promise<number> {
+    this.setCtx(ctx);
+    const cwd = ctx.cwd;
+    const { readRoster } = await import("./state.js");
+    const { discoverRoles } = await import("./roles.js");
+    const { existsSync } = await import("node:fs");
+    const parentId = this.parentSessionId();
+    const entries = readRoster(cwd).filter(
+      (e) => e.parentSessionId === parentId && e.status !== "stopped" && !this.peers.has(e.name),
+    );
+    if (entries.length === 0) return 0;
+    const mod: any = await import("@earendil-works/pi-coding-agent");
+    const roles = discoverRoles(cwd);
+    let recovered = 0;
+    for (const entry of entries) {
+      try {
+        if (!existsSync(entry.peerSessionFile)) {
+          appendEvent(cwd, "peer.recover-failed", { peer: entry.name, reason: "session file missing" });
+          continue;
+        }
+        const baseRole = roles.find((r) => r.name === entry.role);
+        if (!baseRole) {
+          appendEvent(cwd, "peer.recover-failed", { peer: entry.name, reason: `role ${entry.role} not found` });
+          continue;
+        }
+        const role: PeerRole = { ...baseRole, tick: entry.tickBaseS || baseRole.tick };
+        const sm = mod.SessionManager.open(entry.peerSessionFile, undefined, cwd);
+        const { session, model } = await this.assemblePeerSession(
+          ctx, cwd, role, entry.name, entry.address, parentId, sm,
+          entry.model && entry.model !== "default" ? entry.model : undefined,
+        );
+        const peer: Peer = {
+          name: entry.name, role, task: entry.task, contextMode: entry.contextMode,
+          modelLabel: model ? `${model.provider}/${model.id}` : entry.model,
+          address: entry.address, session,
+          sessionId: sm.getSessionId?.() ?? entry.peerSessionId,
+          sessionFile: entry.peerSessionFile,
+          status: "waiting", tickCount: 0, quietStreak: 0, backoffIdx: 0,
+          nextTickAt: Date.now(), timer: null, busy: false,
+          watermark: ((ctx as any).sessionManager?.getEntries?.() ?? []).length,
+          pane: [], findings: [], pendingRetask: null, unsub: null,
+          startedAt: entry.startedAt,
+        };
+        // Callsign counter continuity (sentinel-2 must not collide).
+        const suffix = Number.parseInt(entry.name.split("-").pop() ?? "", 10);
+        const base = entry.name.replace(/-\d+$/, "");
+        if (Number.isFinite(suffix)) this.counters.set(base, Math.max(this.counters.get(base) ?? 0, suffix));
+        peer.pane.push({ kind: "note", text: `recovered with session — watch continues (${entry.contextMode}, tick ${Math.round(role.tick / 60)}m)` });
+        this.attachStream(peer);
+        this.peers.set(entry.name, peer);
+        this.scheduleTick(peer, 3000);
+        appendEvent(cwd, "peer.recovered", { peer: entry.name, peerSessionId: peer.sessionId });
+        recovered++;
+      } catch (err) {
+        appendEvent(cwd, "peer.recover-failed", { peer: entry.name, reason: String(err).slice(0, 200) });
+      }
+    }
+    if (recovered > 0) {
+      this.refreshRoster(cwd);
+      this.notify();
+    }
+    return recovered;
+  }
+
   private parentSessionId(): string {
     try {
       return (this.ctx as any)?.sessionManager?.getSessionId?.() ?? "unknown";
@@ -265,59 +442,16 @@ export class PeerManager {
     });
 
     const mod: any = await import("@earendil-works/pi-coding-agent");
-    // Bare resource loader (btw-sidecar pattern): a peer session loads NO
-    // ambient extensions/skills/agents-files — it is a monitor, not a second
-    // operator cockpit — and its system prompt IS the role charter.
-    const systemPrompt = [
-      `You are ${name}, a resident PEER MONITOR (role: ${role.name}) bound to a main pi agent session (agent://pi/${parentId}).`,
-      `Your address: ${address}. The roster of sibling peers lives at .pi/peer-agent/roster.json.`,
-      "",
-      role.charter,
-      "",
-      `You have read-only tools (${role.tools.join(", ")}) — inspect the repository to verify suspicions before reporting. You cannot modify anything.`,
-      "",
-      PROTOCOL,
-    ].join("\n");
-    const providerExts = await this.loadProviderExtensions(ctx.cwd);
-    const resourceLoader = {
-      getExtensions: () => ({
-        extensions: providerExts?.extensions ?? [],
-        errors: [],
-        runtime: providerExts?.runtime ?? mod.createExtensionRuntime(),
-      }),
-      getSkills: () => ({ skills: [], diagnostics: [] }),
-      getPrompts: () => ({ prompts: [], diagnostics: [] }),
-      getThemes: () => ({ themes: [], diagnostics: [] }),
-      getAgentsFiles: () => ({ agentsFiles: [] }),
-      getSystemPrompt: () => systemPrompt,
-      getAppendSystemPrompt: () => [],
-      extendResources: () => {},
-      reload: async () => {},
-    };
     const parentFile = this.parentSessionFile();
+    // Peer sessions live in a subdirectory so they never pollute the main
+    // session dir's recency — bare `pi --continue` must always resume the
+    // OPERATOR's session, not a peer's. Resume-by-path is unaffected.
+    const peerSessionDir = await this.peerSessionDir(cwd);
     const sm =
       contextMode === "fork" && parentFile
-        ? mod.SessionManager.forkFrom(parentFile, cwd)
-        : mod.SessionManager.create(cwd);
-
-    const wanted = modelRef ?? role.model;
-    let model: any = (ctx as any).model;
-    if (wanted) {
-      const [prov, ...rest] = wanted.split("/");
-      model = (ctx as any).modelRegistry?.find?.(prov, rest.join("/")) ?? model;
-    }
-    const readOnly: any[] = mod.createReadOnlyTools(cwd).filter((t: any) => role.tools.includes(t.name));
-
-    const { session } = await mod.createAgentSession({
-      cwd,
-      sessionManager: sm,
-      model,
-      modelRegistry: (ctx as any).modelRegistry,
-      thinkingLevel: role.thinking ?? "low",
-      noTools: "all",
-      customTools: readOnly,
-      resourceLoader,
-    });
+        ? mod.SessionManager.forkFrom(parentFile, cwd, peerSessionDir)
+        : mod.SessionManager.create(cwd, peerSessionDir);
+    const { session, model } = await this.assemblePeerSession(ctx, cwd, role, name, address, parentId, sm, modelRef ?? role.model);
 
     const peer: Peer = {
       name, role, task, contextMode,
