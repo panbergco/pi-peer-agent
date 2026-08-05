@@ -3,8 +3,8 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ContextMode, Finding, PaneEntry, PeerConfig, PeerRole, PeerStatus, Priority, RosterEntry } from "./types.js";
-import { priorityRank, shortId, uid } from "./types.js";
+import type { AgentMode, ContextMode, Finding, Objective, PaneEntry, PeerConfig, PeerRole, PeerStatus, Priority, RosterEntry } from "./types.js";
+import { objectiveMet, priorityRank, shortId, uid } from "./types.js";
 import { appendEvent, upsertAgentsBlock, writeRoster } from "./state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -37,6 +37,10 @@ export interface Peer {
   watchCwd?: string;
   /** Cumulative usage across ticks + talks (E2): a watch has a visible bill. */
   usage: { input: number; output: number; costUsd: number };
+  /** Agent mode (spec §16): a watch ticks forever, a mission ends. */
+  mode: AgentMode;
+  objective?: Objective;
+  cycles: number;
   unsub: (() => void) | null;
   startedAt: string;
 }
@@ -235,6 +239,9 @@ export class PeerManager {
       status: p.status,
       startedAt: p.startedAt,
       usage: { input: p.usage.input, output: p.usage.output, costUsd: Number(p.usage.costUsd.toFixed(6)) },
+      mode: p.mode,
+      cycles: p.cycles,
+      ...(p.objective ? { objective: p.objective } : {}),
       ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
     writeRoster(cwd, entries);
@@ -257,6 +264,41 @@ export class PeerManager {
 
   /** Shared session assembly for launch AND recovery: charter-as-system-
    *  prompt, provider-extensions-only loader, read-only tools. */
+  /** Where am I? A peer with fresh context otherwise knows nothing about the
+   *  project it serves (incident 2026-08-05: an architect peer could not name
+   *  its own repository). Cheap, static, always included. */
+  private projectPreamble(cwd: string, watchCwd?: string): string {
+    const root = watchCwd ?? cwd;
+    const lines: string[] = [`PROJECT YOU SERVE: ${root}`];
+    try {
+      const { existsSync, readdirSync, readFileSync } = require("node:fs") as typeof import("node:fs");
+      const { basename, join } = require("node:path") as typeof import("node:path");
+      const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+      lines[0] = `PROJECT YOU SERVE: ${basename(root)} (${root})`;
+      try {
+        const branch = execFileSync("git", ["-C", root, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 4000 }).trim();
+        const remote = execFileSync("git", ["-C", root, "remote", "get-url", "origin"], { encoding: "utf8", timeout: 4000 }).trim();
+        lines.push(`git: branch ${branch}${remote ? ` · origin ${remote}` : ""}`);
+      } catch {
+        /* not a git repo — fine */
+      }
+      const entries = readdirSync(root, { withFileTypes: true })
+        .filter((e) => !e.name.startsWith(".") || ["\.pi", "\.github"].includes(e.name))
+        .slice(0, 40)
+        .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+      lines.push(`top level: ${entries.join(", ")}`);
+      for (const doc of ["README.md", "AGENTS.md", "CLAUDE.md", "package.json"]) {
+        const p = join(root, doc);
+        if (!existsSync(p)) continue;
+        const head = readFileSync(p, "utf8").split("\n").slice(0, 12).join("\n").slice(0, 600);
+        lines.push(`--- ${doc} (first lines) ---\n${head}`);
+      }
+    } catch {
+      /* preamble is best-effort — never block a launch */
+    }
+    return lines.join("\n");
+  }
+
   private async assemblePeerSession(
     ctx: ExtensionContext,
     cwd: string,
@@ -277,6 +319,8 @@ export class PeerManager {
       `Your address: ${address}. The roster of sibling peers lives at .pi/peer-agent/roster.json.`,
       "",
       role.charter,
+      "",
+      this.projectPreamble(cwd, watchCwd),
       "",
       `You have read-only tools (${role.tools.join(", ")}) — inspect the repository to verify suspicions before reporting. You cannot modify anything.`,
       ...(watchCwd && watchCwd !== cwd
@@ -343,6 +387,9 @@ export class PeerManager {
       status: "suspended" as PeerStatus,
       startedAt: p.startedAt,
       usage: { input: p.usage.input, output: p.usage.output, costUsd: Number(p.usage.costUsd.toFixed(6)) },
+      mode: p.mode,
+      cycles: p.cycles,
+      ...(p.objective ? { objective: p.objective } : {}),
       ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
     if (entries.length > 0) writeRoster(cwd, entries);
@@ -408,6 +455,9 @@ export class PeerManager {
           pane: [], findings: [], pendingRetask: null, pendingReceipts: [], unsub: null,
           startedAt: entry.startedAt,
           usage: entry.usage ? { ...entry.usage } : { input: 0, output: 0, costUsd: 0 },
+          mode: entry.mode ?? "watch",
+          cycles: entry.cycles ?? 0,
+          ...(entry.objective ? { objective: entry.objective } : {}),
           ...(entry.watchCwd ? { watchCwd: entry.watchCwd } : {}),
         };
         // Callsign counter continuity (sentinel-2 must not collide).
@@ -470,7 +520,7 @@ export class PeerManager {
     }
   }
 
-  async launch(ctx: ExtensionContext, role: PeerRole, task: string, mode?: ContextMode, modelRef?: string, watchCwd?: string): Promise<Peer> {
+  async launch(ctx: ExtensionContext, role: PeerRole, task: string, mode?: ContextMode, modelRef?: string, watchCwd?: string, objective?: Objective): Promise<Peer> {
     this.ctx = ctx;
     const cwd = ctx.cwd;
     if (watchCwd) {
@@ -489,6 +539,7 @@ export class PeerManager {
     appendEvent(cwd, "peer.spawned", {
       peer: name, role: role.name, address, parentSessionId: parentId,
       contextMode, task, model: modelRef ?? role.model ?? "parent", tickBaseS: role.tick,
+      ...(objective ? { mode: "mission", objective } : { mode: "watch" }),
       ...(watchCwd ? { watchCwd } : {}),
     });
 
@@ -509,6 +560,9 @@ export class PeerManager {
       modelLabel: model ? `${model.provider}/${model.id}` : "default",
       address, session,
       usage: { input: 0, output: 0, costUsd: 0 },
+      mode: objective ? "mission" : "watch",
+      cycles: 0,
+      ...(objective ? { objective } : {}),
       ...(watchCwd ? { watchCwd } : {}),
       sessionId: sm.getSessionId?.() ?? "unknown",
       sessionFile: sm.getSessionFile?.() ?? "(in-memory)",
@@ -581,6 +635,10 @@ export class PeerManager {
   }
 
   private backoffDelayMs(peer: Peer): number {
+    // Missions hold a steady cadence: their QUIET means "still working toward
+    // the condition", not "nothing happened" — backing off would stretch a
+    // bounded mission into an unbounded wait.
+    if (peer.mode === "mission") return peer.role.tick * 1000;
     const mult = this.config.backoff[Math.min(peer.backoffIdx, this.config.backoff.length - 1)] ?? 1;
     return peer.role.tick * 1000 * mult;
   }
@@ -598,7 +656,10 @@ export class PeerManager {
     const retask = peer.pendingRetask;
     peer.pendingRetask = null;
 
-    if (!delta && !retask && peer.tickCount > 0 && !peer.role.tickWithoutDelta) {
+    // Missions cycle against their CONDITION, not the conversation: the
+    // delta gate (right for watches) would freeze a mission whenever the
+    // main agent is quiet — exactly when a mission is most likely working.
+    if (peer.mode !== "mission" && !delta && !retask && peer.tickCount > 0 && !peer.role.tickWithoutDelta) {
       peer.backoffIdx = Math.min(peer.backoffIdx + 1, this.config.backoff.length - 1);
       appendEvent(cwd, "tick.skipped", { peer: peer.name, tick: peer.tickCount, backoffIdx: peer.backoffIdx });
       peer.pane.push({ kind: "tick", text: "·" });
@@ -624,6 +685,16 @@ export class PeerManager {
     } else {
       parts.push(`TICK ${peer.tickCount}. Task unchanged: ${peer.task}`);
     }
+    if (peer.mode === "mission" && peer.objective) {
+      const cap = peer.objective.maxCycles ?? 20;
+      parts.push(
+        `MISSION MODE — cycle ${peer.cycles + 1} of at most ${cap}.\n` +
+          `COMPLETION CONDITION (evaluated by the FRAMEWORK after every cycle, never by you): ` +
+          (peer.objective.kind === "file" ? `the file ${peer.objective.value} exists.` : `the command \`${peer.objective.value}\` exits 0.`) +
+          `\nWork toward it, report progress in one short paragraph, and end with QUIET (or a FINDING if something needs the main agent NOW). ` +
+          `Claiming DONE does not end the mission — only the condition does.`,
+      );
+    }
     if (retask) parts.push(`RETASK from the main agent: ${retask}`);
     if (peer.pendingReceipts.length > 0) {
       parts.push(`DELIVERY RECEIPTS since your last tick:\n${peer.pendingReceipts.join("\n")}`);
@@ -636,11 +707,24 @@ export class PeerManager {
     try {
       await peer.session.prompt(parts.join("\n\n"));
       let text = this.lastAssistantText(peer);
-      // One re-ask on a malformed verdict: the common failure is a model
-      // that did tool calls and forgot the closing line — a single nudge
-      // recovers it; a second failure degrades to QUIET as before.
+      // WORK BEFORE VERDICT (incident 2026-08-05: a work-capable peer answered
+      // "I'll start — let me look at the docs", the verdict re-ask consumed the
+      // turn, and it did ZERO tool calls for 34 minutes). A peer that is still
+      // working gets to continue up to a turn budget; the verdict is only
+      // demanded once it stops using tools. Monitors are unaffected: they emit
+      // a verdict on turn one and never enter the loop.
+      const budget = peer.mode === "mission" ? 6 : 3;
+      let turns = 0;
+      while (!this.parseVerdict(text) && turns < budget && this.usedToolsLastTurn(peer)) {
+        turns++;
+        appendEvent(cwd, "peer.work-turn", { peer: peer.name, tick: peer.tickCount, turn: turns });
+        await peer.session.prompt(
+          "Continue working with your tools. When you have nothing further to do this cycle, finish with your verdict line (QUIET or FINDING[...]: ...).",
+        );
+        text = this.lastAssistantText(peer);
+      }
       if (!this.parseVerdict(text)) {
-        appendEvent(cwd, "peer.verdict-reask", { peer: peer.name, tick: peer.tickCount });
+        appendEvent(cwd, "peer.verdict-reask", { peer: peer.name, tick: peer.tickCount, afterWorkTurns: turns });
         await peer.session.prompt("Your verdict line was missing. Reply NOW with only the verdict line: QUIET or FINDING[info|steering|interrupt]: <paragraph>.");
         text = this.lastAssistantText(peer);
       }
@@ -654,8 +738,10 @@ export class PeerManager {
       peer.pane.push({ kind: "note", text: `tick errored (will retry): ${String(err).slice(0, 100)}` });
     } finally {
       this.accountUsage(peer, usageFrom, "tick", cwd);
+      if (peer.mode === "mission" && peer.objective) this.evaluateMission(peer, cwd);
       peer.busy = false;
-      if ((peer.status as PeerStatus) !== "stopped") {
+      const ended = (peer.status as PeerStatus) === "done" || (peer.status as PeerStatus) === "exhausted";
+      if ((peer.status as PeerStatus) !== "stopped" && !ended) {
         if (peer.status !== "error") peer.status = "waiting";
         this.scheduleTick(peer, this.backoffDelayMs(peer));
         this.refreshRoster(cwd);
@@ -688,6 +774,19 @@ export class PeerManager {
     });
   }
 
+  /** Did the peer's most recent turn actually call tools? Distinguishes
+   *  "still working" from "done but forgot the verdict line". */
+  private usedToolsLastTurn(peer: Peer): boolean {
+    const msgs: any[] = peer.session.state?.messages ?? [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m?.role !== "assistant") continue;
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      return blocks.some((b: any) => b?.type === "toolCall" || b?.type === "tool_use" || b?.type === "toolUse");
+    }
+    return false;
+  }
+
   private lastAssistantText(peer: Peer): string {
     const msgs: any[] = peer.session.state?.messages ?? [];
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -699,6 +798,50 @@ export class PeerManager {
   private parseVerdict(text: string): RegExpMatchArray | null {
     const matches = [...text.matchAll(/^\s*(QUIET\s*$|FINDING\[(info|steering|interrupt)\]\s*:\s*([\s\S]*))/gim)];
     return matches.length > 0 ? matches[matches.length - 1]! : null;
+  }
+
+  /** Mission bookkeeping: the FRAMEWORK decides completion (spec §16). A peer
+   *  claiming DONE while its condition is false is refused and keeps working. */
+  private evaluateMission(peer: Peer, cwd: string): void {
+    if (!peer.objective) return;
+    peer.cycles++;
+    const met = objectiveMet(peer.objective, peer.watchCwd ?? cwd);
+    const claimed = /\bDONE\b/.test(this.lastAssistantText(peer));
+    if (!met && claimed) {
+      appendEvent(cwd, "mission.claim-refused", { peer: peer.name, cycle: peer.cycles, condition: `${peer.objective.kind}:${peer.objective.value}` });
+      peer.pane.push({ kind: "note", text: "DONE claimed but the condition is not met — mission continues" });
+      peer.pendingReceipts.push("Your DONE claim was REFUSED: the framework evaluated your completion condition as still false. Keep working.");
+    }
+    if (met) {
+      appendEvent(cwd, "mission.completed", { peer: peer.name, cycles: peer.cycles, condition: `${peer.objective.kind}:${peer.objective.value}` });
+      peer.pane.push({ kind: "note", text: `✓ mission complete after ${peer.cycles} cycle${peer.cycles === 1 ? "" : "s"} — condition met` });
+      this.endMission(peer, cwd, "done");
+      return;
+    }
+    const cap = peer.objective.maxCycles ?? 20;
+    if (peer.cycles >= cap) {
+      appendEvent(cwd, "mission.exhausted", { peer: peer.name, cycles: peer.cycles, condition: `${peer.objective.kind}:${peer.objective.value}` });
+      peer.pane.push({ kind: "note", text: `mission exhausted after ${peer.cycles} cycles — condition never met` });
+      this.endMission(peer, cwd, "exhausted");
+    }
+  }
+
+  /** A mission that ended stops ticking but keeps its session (resumable). */
+  private endMission(peer: Peer, cwd: string, status: "done" | "exhausted"): void {
+    if (peer.timer) clearTimeout(peer.timer);
+    peer.timer = null;
+    peer.status = status;
+    this.refreshRoster(cwd);
+    this.notify();
+    const verb = status === "done" ? "completed" : "exhausted";
+    this.pi.sendMessage(
+      {
+        customType: "peer-finding",
+        content: `[peer-agent] mission ${verb}: ${peer.address} after ${peer.cycles} cycles · condition ${peer.objective?.kind}:${peer.objective?.value}\n\nLast report:\n${this.lastAssistantText(peer).slice(0, 1500)}`,
+        display: true,
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
   }
 
   private parentAddress(): string {

@@ -341,6 +341,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         let mode: any;
         let tickOverride: number | undefined;
         let watchCwd: string | undefined;
+        let objective: { kind: "file" | "exit0"; value: string; maxCycles?: number } | undefined;
+        let maxCycles = Number.NaN;
         taskWords = taskWords.filter((w, i, arr) => {
           if (w === "--fork" || w === "--compacted" || w === "--fresh") {
             mode = w.slice(2);
@@ -355,8 +357,22 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             watchCwd = path.resolve(ctx.cwd, w);
             return false;
           }
+          if (w === "--until-file" || w === "--until-exit0" || w === "--max-cycles") return false;
+          if (arr[i - 1] === "--until-file") {
+            objective = { kind: "file", value: w };
+            return false;
+          }
+          if (arr[i - 1] === "--until-exit0") {
+            objective = { kind: "exit0", value: w };
+            return false;
+          }
+          if (arr[i - 1] === "--max-cycles") {
+            maxCycles = Number.parseInt(w, 10);
+            return false;
+          }
           return true;
         });
+        if (objective && Number.isFinite(maxCycles)) objective.maxCycles = maxCycles;
         if (!rest[0]) {
           await interactiveLaunch(ctx);
           return;
@@ -370,8 +386,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         if (!task && ui?.input) task = (await ui.input("Standing task for this peer", role.description)) ?? "";
         if (!task) task = role.description || "watch the main agent's work per your charter";
         const effRole = tickOverride ? { ...role, tick: tickOverride } : role;
-        const peer = await manager.launch(ctx, effRole, task, mode, undefined, watchCwd);
-        ui?.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(effRole.tick / 60)}m${watchCwd ? `, watching ${watchCwd}` : ""}) — ${peer.sessionId}`, "info");
+        const peer = await manager.launch(ctx, effRole, task, mode, undefined, watchCwd, objective);
+        ui?.notify?.(
+          `${peer.name} launched (${peer.mode}${peer.objective ? ` until ${peer.objective.kind}:${peer.objective.value}` : ""}, ${peer.contextMode}, tick ${Math.round(effRole.tick / 60)}m${watchCwd ? `, watching ${watchCwd}` : ""})`,
+          "info",
+        );
         if (!sidecar) void openSidecar(ctx);
         return;
       }
@@ -473,6 +492,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       context: Type.Optional(Type.String({ description: "fork | compacted | fresh (default: role's choice)" })),
       tickMinutes: Type.Optional(Type.Number({ description: "Override this peer's tick interval in MINUTES (min 1). Each peer has its own. The framework issues ticks; the peer itself can never change this." })),
       cwd: Type.Optional(Type.String({ description: "Watch directory: root the peer's read-only file tools at this path (e.g. an executor worktree) instead of the project root." })),
+      untilFile: Type.Optional(Type.String({ description: "MISSION mode: work in cycles until this file exists, then report DONE with evidence and retire. Framework-evaluated." })),
+      untilExit0: Type.Optional(Type.String({ description: "MISSION mode: work in cycles until this shell command exits 0. Framework-evaluated, never self-asserted." })),
+      maxCycles: Type.Optional(Type.Number({ description: "MISSION mode: give up after this many cycles (default 20)." })),
     }),
     async execute(_id: string, params: any, _signal: unknown, _u: unknown, ctx: any) {
       track(ctx);
@@ -546,6 +568,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               `task: ${p.task}`,
               `tick: every ${Math.round(p.role.tick / 60)}m · completed ${p.tickCount} · next in ~${etaS >= 90 ? Math.ceil(etaS / 60) + "m" : etaS + "s"} · quiet streak ${p.quietStreak}`,
               `usage: ${p.usage.input} in · ${p.usage.output} out · $${p.usage.costUsd.toFixed(4)}`,
+              p.mode === "mission"
+                ? `mode: MISSION · condition ${p.objective?.kind}:${p.objective?.value} · cycles ${p.cycles}/${p.objective?.maxCycles ?? 20} · ${p.status}`
+                : `mode: watch (standing)`,
               `context: ${p.contextMode} · model: ${p.modelLabel}`,
               `session: ${p.sessionId}`,
               `resume standalone: pi --session ${p.sessionFile}`,
@@ -718,8 +743,13 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const role = discoverRoles(ctx.cwd).find((r) => r.name === cmd.role);
         if (!role) return { ok: false, message: `unknown role "${cmd.role}"` };
         const eff = cmd.tickMinutes ? { ...role, tick: Math.max(60, Math.floor(cmd.tickMinutes * 60)) } : role;
-        const peer = await manager.launch(ctx, eff, String(cmd.task ?? role.description), cmd.context, undefined, cmd.watchCwd ? path.resolve(ctx.cwd, String(cmd.watchCwd)) : undefined);
-        return { ok: true, message: `${peer.name} launched (${peer.contextMode}, tick ${Math.round(eff.tick / 60)}m) · resume: pi --session ${peer.sessionFile}` };
+        const obj = cmd.untilFile
+          ? { kind: "file" as const, value: String(cmd.untilFile), maxCycles: cmd.maxCycles }
+          : cmd.untilExit0
+            ? { kind: "exit0" as const, value: String(cmd.untilExit0), maxCycles: cmd.maxCycles }
+            : undefined;
+        const peer = await manager.launch(ctx, eff, String(cmd.task ?? role.description), cmd.context, undefined, cmd.watchCwd ? path.resolve(ctx.cwd, String(cmd.watchCwd)) : undefined, obj);
+        return { ok: true, message: `${peer.name} launched (${peer.mode}${peer.objective ? ` until ${peer.objective.kind}:${peer.objective.value}` : ""}, tick ${Math.round(eff.tick / 60)}m) · resume: pi --session ${peer.sessionFile}` };
       }
       case "talk": {
         const res = await manager.talk(String(cmd.name), String(cmd.message), "operator");

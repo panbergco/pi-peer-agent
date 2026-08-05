@@ -2,7 +2,37 @@
 
 export type Priority = "info" | "steering" | "interrupt";
 export type ContextMode = "fork" | "compacted" | "fresh";
-export type PeerStatus = "starting" | "waiting" | "thinking" | "error" | "stopped" | "suspended";
+export type PeerStatus = "starting" | "waiting" | "thinking" | "error" | "stopped" | "suspended" | "done" | "exhausted";
+
+/** Agent modes (spec §16). "watch" ticks forever against a standing objective;
+ *  "mission" works bounded cycles until a FRAMEWORK-evaluated condition holds.
+ *  The enum is open — a third (event-bound) mode is reserved, not designed. */
+export type AgentMode = "watch" | "mission";
+
+/** A mission's completion predicate — mechanical, never self-asserted.
+ *  file: a path that must exist · exit0: a command that must exit 0. */
+export interface Objective {
+  kind: "file" | "exit0";
+  value: string;
+  /** Give up after this many cycles (default 20). */
+  maxCycles?: number;
+}
+
+/** Evaluate a mission objective. Pure, synchronous, framework-owned. */
+export function objectiveMet(obj: Objective, cwd: string): boolean {
+  try {
+    if (obj.kind === "file") {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { existsSync } = require("node:fs") as typeof import("node:fs");
+      const { isAbsolute, join } = require("node:path") as typeof import("node:path");
+      return existsSync(isAbsolute(obj.value) ? obj.value : join(cwd, obj.value));
+    }
+    const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+    return spawnSync("bash", ["-c", obj.value], { cwd, timeout: 60_000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
 
 export const PRIORITY_ORDER: Priority[] = ["info", "steering", "interrupt"];
 
@@ -71,7 +101,7 @@ export interface PeerConfig {
 
 export const DEFAULT_CONFIG: PeerConfig = {
   toggleKey: "ctrl+alt+p",
-  focusKey: "ctrl+alt+o",
+  focusKey: "ctrl+alt+l",
   maxPeers: 6,
   overlayWidthRatio: 0.7,
   overlayHeightRatio: 0.7,
@@ -95,6 +125,11 @@ export interface RosterEntry {
   startedAt: string;
   /** Watch directory (E1): peer file tools rooted here when set. */
   watchCwd?: string;
+  /** Agent mode (spec §16); absent = "watch" for pre-existing rosters. */
+  mode?: AgentMode;
+  /** Mission objective + progress (mode === "mission"). */
+  objective?: Objective;
+  cycles?: number;
   /** Cumulative usage (E2): tokens + cost across ticks and talks. */
   usage?: { input: number; output: number; costUsd: number };
 }

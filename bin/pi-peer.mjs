@@ -111,6 +111,7 @@ usage: pi-peer [--cwd <dir>] <command>
   list                                     crew overview (no live session needed)
   findings [name]                          delivered findings from the ledger (no session needed)
   launch <role> <task…> [--tick <min>] [--context fork|compacted|fresh] [--watch <dir>]
+         [--until-file <path> | --until-exit0 '<cmd>'] [--max-cycles N]   # MISSION mode
   talk <name> <message…>                   send a message, print the peer's reply
   retask <name> <task…> [--tick <min>]
   tick <name> <minutes>                    change a peer's interval
@@ -130,8 +131,9 @@ async function main() {
       }
       for (const e of roster) {
         const u = e.usage ? ` ↑${e.usage.input} ↓${e.usage.output} $${e.usage.costUsd.toFixed(3)}` : "";
+        const m = e.mode === "mission" ? ` [mission ${e.cycles ?? 0}/${e.objective?.maxCycles ?? 20} until ${e.objective?.kind}:${e.objective?.value}]` : "";
         console.log(
-          `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${String(e.status).padEnd(10)} tick ${String(Math.round((e.tickBaseS ?? 300) / 60) + "m").padEnd(5)}${u} · ${e.task}`,
+          `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${String(e.status).padEnd(10)} tick ${String(Math.round((e.tickBaseS ?? 300) / 60) + "m").padEnd(5)}${u}${m} · ${e.task}`,
         );
       }
       return;
@@ -156,9 +158,13 @@ async function main() {
       const tick = takeFlag("--tick");
       const context = takeFlag("--context");
       const watch = takeFlag("--watch");
+      const untilFile = takeFlag("--until-file");
+      const untilExit0 = takeFlag("--until-exit0");
+      const maxCycles = takeFlag("--max-cycles");
       const task = argv.join(" ").trim();
       if (!task) fail("launch needs a task");
-      await run({ action: "launch", role, task, tickMinutes: tick ? Number(tick) : undefined, context, watchCwd: watch ? path.resolve(watch) : undefined });
+      await run({ action: "launch", role, task, tickMinutes: tick ? Number(tick) : undefined, context, watchCwd: watch ? path.resolve(watch) : undefined,
+        untilFile, untilExit0, maxCycles: maxCycles ? Number(maxCycles) : undefined });
       return;
     }
     case "talk": {

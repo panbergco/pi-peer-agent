@@ -55,7 +55,7 @@ inside peers via the provider-extension bridge (see Configuration).
 ### Keys
 
 - **`Ctrl+Alt+P`** — show / hide the panel
-- **`Ctrl+Alt+O`** — move the keyboard between panel and main prompt (panel stays)
+- **`Ctrl+Alt+L`** — move the keyboard between panel and main prompt (panel stays)
 - **`Esc`** — close the panel (clears a draft first)
 
 ### The panel
@@ -137,7 +137,7 @@ memory — ask it what happened, when, and why; info-only, never interrupts, 5m)
 | Key | Default | Meaning |
 |---|---|---|
 | `toggleKey` | `ctrl+alt+p` | panel show/hide |
-| `focusKey` | `ctrl+alt+o` | keyboard panel ⇄ main prompt |
+| `focusKey` | `ctrl+alt+l` | keyboard panel ⇄ main prompt |
 | `overlayWidthRatio` / `overlayHeightRatio` | `0.7` | panel size vs terminal |
 | `providerExtensions` | `["pi-devin-auth", "pi-anthropic-oauth"]` | auth/provider extensions loaded into peer sessions |
 | `deltaCapChars`, `backoff` | `6000`, `[1,2,4,8]` | tick delta cap, quiet-backoff ladder |

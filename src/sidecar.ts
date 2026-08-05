@@ -88,8 +88,12 @@ export class PeerSidecar extends Container implements Focusable {
   }
 
   set focused(value: boolean) {
+    const changed = this._focused !== value;
     this._focused = value;
     (this.input as any).focused = value;
+    // Grab the mouse only while we hold the keyboard: an unfocused panel must
+    // leave the terminal's own selection/copy alone.
+    if (changed) this.setMouseCapture(value);
   }
 
   constructor(private opts: SidecarOptions) {
@@ -151,12 +155,19 @@ export class PeerSidecar extends Container implements Focusable {
       { name: "help", description: "list panel commands" },
     ];
     this.input.setAutocompleteProvider(new CombinedAutocompleteProvider(commands as any, process.cwd()));
-    // SGR mouse reporting so wheel events reach handleInput (btw-proven).
-    (opts.tui as any).terminal?.write?.("\x1b[?1000h\x1b[?1006h");
+    // Mouse reporting is enabled only while the panel is FOCUSED (see the
+    // focused setter): with it on, the terminal hands us the mouse and the
+    // operator cannot select/copy text with the mouse at all.
+  }
+
+  /** SGR mouse reporting: on while focused (wheel scrolling), off otherwise so
+   *  normal terminal selection/copy works (operator report 2026-08-05). */
+  private setMouseCapture(on: boolean): void {
+    (this.opts.tui as any).terminal?.write?.(on ? "\x1b[?1000h\x1b[?1006h" : "\x1b[?1000l\x1b[?1006l");
   }
 
   dispose(): void {
-    (this.opts.tui as any).terminal?.write?.("\x1b[?1000l\x1b[?1006l");
+    this.setMouseCapture(false);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -306,9 +317,9 @@ export class PeerSidecar extends Container implements Focusable {
     return data === "\x1b\x10" || data === "\x1b[112;7u" || data === "\x1b[80;7u";
   }
 
-  /** ctrl+alt+o — focus toggle chord (legacy ESC+ctrl-o and CSI-u). */
+  /** ctrl+alt+l — focus toggle chord (legacy ESC+ctrl-l and CSI-u). */
   private isFocusChord(data: string): boolean {
-    return data === "\x1b\x0f" || data === "\x1b[111;7u" || data === "\x1b[79;7u";
+    return data === "\x1b\x0c" || data === "\x1b[108;7u" || data === "\x1b[76;7u";
   }
 
   handleInput(data: string): void {
@@ -555,8 +566,8 @@ export class PeerSidecar extends Container implements Focusable {
     lines.push(...inputLines);
 
     const hints = this._focused
-      ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc close · ctrl+alt+o → main prompt (panel stays) "
-      : " typing goes to the MAIN prompt · ctrl+alt+o focus panel · ctrl+alt+p hide ";
+      ? " type = talk · /yank copies · Tab switch · ↑↓/wheel scroll · esc close · ctrl+alt+l → main (mouse-select works there) "
+      : " typing goes to the MAIN prompt · mouse selection/copy works here · ctrl+alt+l focus panel · ctrl+alt+p hide ";
     lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
     lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
     return lines;
