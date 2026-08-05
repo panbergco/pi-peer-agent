@@ -309,8 +309,7 @@ the ledger is the coordination record — the pair reconstructs any incident.
 
 ## 12. Embedding in a larger system (prepared, not premature)
 
-peer-agent is designed to be embeddable: a resident crew that a larger dispatch or
-automation system can drive without knowing peer-agent's internals, and without
+peer-agent is designed to be embeddable: a resident crew that any larger automation system can drive without knowing peer-agent's internals, and without
 peer-agent knowing anything about that system. No external system's name, design, or
 mechanics are documented here.
 
