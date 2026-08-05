@@ -328,6 +328,53 @@ the ledger is the coordination record — the pair reconstructs any incident.
 - **Vocabulary:** on integration, role names and event kinds register in the PISG
   vocab so the lingo wall owns them (`pisg vocab check` clean).
 
+### 12.1 Integration findings — live PISG observation (2026-08-05)
+
+Read-only inspection of the parallel PISG session (mid phase-3-fleet arc: budget-driven
+dispatch, assignments scheduler v2, two-hop rule, worktree-per-executor, fleet board and
+exit drill queued) surfaced concrete integration surfaces — and four pre-integration
+enhancements to peer-agent itself:
+
+**Where peers slot into PISG's machinery:**
+
+1. **Fleet observability (PH3-06/07's missing layer).** Phase 3 runs ≥3 concurrent
+   executors in isolated worktrees under one conductor. Peers are the natural
+   per-executor watchdogs: a fleet-sentinel bound to each executor's WORKTREE pushes
+   stall/drift/conflict-risk findings to the conductor's session; the fleet board
+   renders the peer crew beside executors/claims/budgets.
+2. **Findings ↦ review feedback (two-hop rule, PH3-03).** PISG enforces "feedback
+   author never fixes" in the scheduler. A peer finding that demands a repo change
+   should register as `review.feedback` authored by the peer — gaining mechanical
+   resolution tracking AND the two-hop wall for free (a peer can never be assigned
+   anyway; its findings then carry scheduler weight, not just advisory weight).
+3. **Budget integration (PH3-01, D-15).** Dispatch is budget-bounded by expected
+   value; watchers cost tokens too. Peer per-tick usage feeds the same budget
+   accounting so the conductor's spend picture includes its standing watch.
+4. **Judgment tier support.** Sprints face a judge at archive. An evidence-auditor
+   peer watching the proof bundle AS IT FORMS flags evidence gaps before the
+   judgment tier does — standing counterpart to the judge's final verdict.
+5. **Decision desk (PH3-08).** Steering findings that contradict a standing ruling
+   (D-xx) should file decision requests to the decider (auto mode) instead of
+   interrupting the operator — peers become a decider input channel.
+6. **Server-first residence (PH3-13, D-03).** PISG converges on a headless loop with
+   attach-viewports. Peer-agent's session-decoupled transports (control files, inbox,
+   roster/ledger reads) already match this shape; the peers panel is an attach-style
+   viewport. `pisg attach` should be able to surface the crew.
+7. **Event store.** PISG events live in queryable SQLite; peer-agent's JSONL ledger
+   should write through a pluggable sink so integrated deployments land peer.* events
+   in the store under registered vocab.
+
+**Pre-integration enhancements to peer-agent (do these here, before the move):**
+
+- **E1 — per-peer cwd**: launch a peer bound to a directory other than the project
+  root (an executor's worktree). Unlocks finding 1; small (launch param + tool pass-through).
+- **E2 — per-peer usage accounting**: tokens/cost from the peer's AgentSession into
+  roster + ledger (`peer.usage` events). Unlocks finding 3; independently valuable.
+- **E3 — event-sink seam**: `appendEvent` behind an interface (JSONL default) so the
+  PISG store becomes a drop-in sink. Unlocks finding 7.
+- **E4 — structured finding refs**: optional `files:[]` on FINDING verdicts so
+  review-feedback registration (finding 2) has mechanical targets.
+
 ## 13. Phasing
 
 - **P0 — resident core (prove the loop):** role discovery, one peer, fresh context,
