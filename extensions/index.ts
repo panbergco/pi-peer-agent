@@ -22,7 +22,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   const config = loadConfig();
   const manager = new PeerManager(pi, config);
   let lastCtx: ExtensionContext | null = null;
-  let sidecar: { component: PeerSidecar; handle: any; close: () => void } | null = null;
+  let sidecar: { component: PeerSidecar; handle: any; tui?: any; close: () => void } | null = null;
 
   const track = (ctx: ExtensionContext) => {
     lastCtx = ctx;
@@ -231,7 +231,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               tui.requestRender();
             }
           }, 1000);
-          sidecar = { component, handle: null, close: () => done(undefined) };
+          sidecar = { component, handle: null, tui, close: () => done(undefined) };
           return component as any;
         },
         {
@@ -448,7 +448,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       if (sidecar.handle && !sidecar.handle.isFocused?.()) {
         sidecar.handle.focus();
         sidecar.component.focused = true;
-        (lastCtx ?? ctx).ui?.notify?.("keys → peers panel", "info");
+        // The focus flag changes what the panel draws (input box, title) —
+        // request the repaint explicitly; nothing else will.
+        sidecar.tui?.requestRender?.();
       }
     },
   });
