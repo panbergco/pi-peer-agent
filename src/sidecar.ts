@@ -51,6 +51,8 @@ export interface SidecarOptions {
   /** Direct launch from panel input: /launch <role> <task…>. */
   onLaunchDirect: (role: string, task: string) => void;
   onTalk: (name: string, text: string) => void;
+  /** /model [query] — change the selected peer's model (picker when ambiguous). */
+  onModel: (name: string, query: string) => void;
   onRetask: (name: string, task: string) => void;
   insertText: (text: string) => void;
   yankText: (text: string, label: string) => void;
@@ -156,7 +158,11 @@ export class PeerSidecar extends Container implements Focusable {
     const peer = this.selectedPeer();
     switch ((verb ?? "").toLowerCase()) {
       case "help":
-        this.setFlash("/launch [role task…] · /stop [name] · /retask <task…> · /insert · /yank · /resume · /close");
+        this.setFlash("/launch [role task…] · /model [query] · /stop [name] · /retask <task…> · /insert · /yank · /resume · /close");
+        return;
+      case "model":
+        if (peer) this.opts.onModel(peer.name, rest.join(" "));
+        else this.setFlash("no peer selected — /launch first");
         return;
       case "launch":
         if (rest.length >= 2) this.opts.onLaunchDirect(rest[0]!, rest.slice(1).join(" "));

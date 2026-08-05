@@ -56,6 +56,10 @@ export interface PeerConfig {
   /** Overlay geometry — btw-style responsive centered modal (ratio of terminal, clamped). */
   overlayWidthRatio: number;
   overlayHeightRatio: number;
+  /** Auth/provider extensions loaded INTO peer sessions (never UI extensions).
+   *  Needed so models whose providers are registered by extensions (e.g.
+   *  devin) stream inside peers too. Resolved from ~/.pi/agent/npm. */
+  providerExtensions: string[];
   /** Backoff multipliers applied to the role's base tick on consecutive quiet/skip. */
   backoff: number[];
   deltaCapChars: number;
@@ -66,6 +70,7 @@ export const DEFAULT_CONFIG: PeerConfig = {
   maxPeers: 6,
   overlayWidthRatio: 0.7,
   overlayHeightRatio: 0.7,
+  providerExtensions: ["pi-devin-auth", "pi-anthropic-oauth"],
   backoff: [1, 2, 4, 8],
   deltaCapChars: 6000,
 };

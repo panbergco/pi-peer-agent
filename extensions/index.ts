@@ -142,6 +142,32 @@ export default function piPeerAgent(pi: ExtensionAPI) {
                 tui.requestRender();
               });
             },
+            onModel: (name: string, query: string) => {
+              void (async () => {
+                const uiCtx = lastCtx ?? ctx;
+                const models = manager.listModels();
+                const q = query.trim().toLowerCase();
+                const filtered = q ? models.filter((m) => m.toLowerCase().includes(q)) : models;
+                if (filtered.length === 0) {
+                  uiCtx.ui?.notify?.(`no model matching "${query}"`, "error");
+                  return;
+                }
+                let choice = filtered[0]!;
+                if (filtered.length > 1) {
+                  sidecar?.handle?.unfocus?.();
+                  if (sidecar) sidecar.component.focused = false;
+                  const picked = await (uiCtx.ui as any)?.select?.(`Model for ${name} (${filtered.length} available in pi)`, filtered);
+                  if (!picked) return;
+                  choice = picked;
+                }
+                const res = await manager.setPeerModel(name, choice);
+                uiCtx.ui?.notify?.(res.message, res.ok ? "info" : "error");
+                if (filtered.length > 1) {
+                  sidecar?.handle?.focus?.();
+                  if (sidecar) sidecar.component.focused = true;
+                }
+              })();
+            },
             onRetask: (name: string, task: string) => {
               manager.retask(name, task);
               (lastCtx ?? ctx).ui?.notify?.(`${name} retasked`, "info");
@@ -447,6 +473,23 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       if (res.status === "missing") return { content: [{ type: "text" as const, text: `No active peer named ${params.name}. Use peer_roster to list peers, or peer_launch to spawn one.` }], details: {} };
       if (res.status === "busy") return { content: [{ type: "text" as const, text: `${params.name} is mid-tick right now — retry in a few seconds.` }], details: {} };
       return { content: [{ type: "text" as const, text: `${params.name} replies:\n\n${res.reply || "(empty reply)"}` }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "peer_model",
+    label: "Peer model",
+    description:
+      "Change a running peer's model live (transcript and tick loop continue). Accepts provider/id or a " +
+      "unique substring; the available set mirrors pi's own model registry.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Peer callsign, e.g. sentinel-1." }),
+      model: Type.String({ description: "provider/model-id or unique substring (e.g. 'glm-5-2')." }),
+    }),
+    async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
+      track(ctx);
+      const res = await manager.setPeerModel(params.name, params.model);
+      return { content: [{ type: "text" as const, text: res.message }], details: {} };
     },
   });
 

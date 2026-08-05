@@ -113,6 +113,67 @@ export class PeerManager {
   }
 
   private renderPending = false;
+  private providerExtsCache: { extensions: any[]; runtime: any } | null | undefined;
+
+  /** Load auth/provider extensions for peer sessions (once, cached). Without
+   *  these, models whose providers are registered by extensions (devin) fail
+   *  with 'No API key' inside peers while working in the main session. */
+  private async loadProviderExtensions(cwd: string): Promise<{ extensions: any[]; runtime: any } | null> {
+    if (this.providerExtsCache !== undefined) return this.providerExtsCache;
+    try {
+      const { readFileSync, existsSync } = await import("node:fs");
+      const path = await import("node:path");
+      const os = await import("node:os");
+      // Resolve pi's dist from its own process entry (jiti cannot
+      // require.resolve the global package from our tree).
+      let loader: any = null;
+      const argvEntry = process.argv[1] ?? "";
+      const marker = `${path.sep}@earendil-works${path.sep}pi-coding-agent${path.sep}`;
+      const idx = argvEntry.indexOf(marker);
+      const candidates: string[] = [];
+      if (idx !== -1) candidates.push(path.join(argvEntry.slice(0, idx + marker.length), "dist", "core", "extensions", "index.js"));
+      candidates.push("/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/index.js");
+      for (const c of candidates) {
+        if (!existsSync(c)) continue;
+        try {
+          loader = await import(c);
+          break;
+        } catch {
+          /* next candidate */
+        }
+      }
+      if (!loader?.loadExtensions) {
+        appendEvent(cwd, "provider-ext.error", { error: "loader unresolvable", candidates });
+        this.providerExtsCache = null;
+        return null;
+      }
+      const names = this.config.providerExtensions ?? [];
+      const entryPaths: string[] = [];
+      for (const name of names) {
+        const pkgDir = path.join(os.homedir(), ".pi", "agent", "npm", "node_modules", name);
+        const pkgJson = path.join(pkgDir, "package.json");
+        if (!existsSync(pkgJson)) continue;
+        const pkg = JSON.parse(readFileSync(pkgJson, "utf8"));
+        for (const rel of pkg?.pi?.extensions ?? []) {
+          const abs = path.resolve(pkgDir, rel);
+          if (existsSync(abs)) entryPaths.push(abs);
+        }
+      }
+      if (entryPaths.length === 0) {
+        this.providerExtsCache = null;
+        return null;
+      }
+      const result = await loader.loadExtensions(entryPaths, cwd);
+      for (const e of result.errors ?? []) appendEvent(cwd, "provider-ext.error", { path: e.path, error: String(e.error).slice(0, 200) });
+      this.providerExtsCache = { extensions: result.extensions ?? [], runtime: result.runtime };
+      appendEvent(cwd, "provider-ext.loaded", { count: result.extensions?.length ?? 0, names });
+      return this.providerExtsCache;
+    } catch (err) {
+      appendEvent(cwd, "provider-ext.error", { error: String(err).slice(0, 200) });
+      this.providerExtsCache = null;
+      return null;
+    }
+  }
 
   /** Throttled: streaming fires per token, but the TUI repaints at most
    *  ~12 fps — token-rate full re-renders read as flicker. */
@@ -217,8 +278,13 @@ export class PeerManager {
       "",
       PROTOCOL,
     ].join("\n");
+    const providerExts = await this.loadProviderExtensions(ctx.cwd);
     const resourceLoader = {
-      getExtensions: () => ({ extensions: [], errors: [], runtime: mod.createExtensionRuntime() }),
+      getExtensions: () => ({
+        extensions: providerExts?.extensions ?? [],
+        errors: [],
+        runtime: providerExts?.runtime ?? mod.createExtensionRuntime(),
+      }),
       getSkills: () => ({ skills: [], diagnostics: [] }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }),
       getThemes: () => ({ themes: [], diagnostics: [] }),
@@ -501,6 +567,42 @@ export class PeerManager {
       this.notify();
     }
     return { status: "ok", reply };
+  }
+
+  /** Live model switch on a running peer (native session.setModel — the
+   *  transcript and tick loop continue uninterrupted). */
+  async setPeerModel(name: string, ref: string): Promise<{ ok: boolean; message: string }> {
+    const peer = this.peers.get(name);
+    if (!peer || peer.status === "stopped") return { ok: false, message: `no active peer named ${name}` };
+    const registry: any = (this.ctx as any)?.modelRegistry;
+    const all: any[] = registry?.getAll?.() ?? [];
+    const [prov, ...rest] = ref.split("/");
+    let model: any = rest.length ? registry?.find?.(prov, rest.join("/")) : undefined;
+    if (!model) {
+      const q = ref.toLowerCase();
+      const matches = all.filter((m) => `${m.provider}/${m.id}`.toLowerCase().includes(q));
+      if (matches.length === 1) model = matches[0];
+      else if (matches.length > 1)
+        return { ok: false, message: `ambiguous "${ref}": ${matches.slice(0, 6).map((m) => `${m.provider}/${m.id}`).join(", ")}${matches.length > 6 ? "…" : ""}` };
+    }
+    if (!model) return { ok: false, message: `no model matching "${ref}" in pi's registry` };
+    try {
+      await peer.session.setModel(model);
+      const label = `${model.provider}/${model.id}`;
+      peer.modelLabel = label;
+      peer.pane.push({ kind: "note", text: `model → ${label}` });
+      appendEvent(this.ctx?.cwd ?? process.cwd(), "peer.model", { peer: name, model: label });
+      this.notify();
+      return { ok: true, message: `${name} now runs ${label}` };
+    } catch (err) {
+      return { ok: false, message: `setModel failed: ${String(err).slice(0, 160)}` };
+    }
+  }
+
+  /** Models available in pi (the session's own registry — the same list pi serves). */
+  listModels(): string[] {
+    const registry: any = (this.ctx as any)?.modelRegistry;
+    return (registry?.getAll?.() ?? []).map((m: any) => `${m.provider}/${m.id}`);
   }
 
   retask(name: string, task: string): boolean {
