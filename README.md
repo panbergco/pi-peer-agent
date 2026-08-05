@@ -150,6 +150,13 @@ spawns, ticks, findings with bodies, suspends/recoveries, model/tick changes),
 the project knows the control surface. Peer session files live in a `peer-agent/`
 subdirectory of pi's session dir, so `pi --continue` always resumes *your* session.
 
+## Skill
+
+The package ships a `peer-agent` skill (pi loads it on demand): operational guidance
+for agents — peer-vs-subagent choice, role selection, context/tick/model heuristics,
+finding etiquette, and the CLI. Listed under `[Skills]` in any session with the
+package installed.
+
 ## Spec
 
 Full design — identity/binding (MACP addressing), tick engine, delivery mapping,
