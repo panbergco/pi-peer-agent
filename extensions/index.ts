@@ -93,6 +93,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     return { anchor: "top-center" as const, offsetY: 1, width, maxHeight, nonCapturing: true as const };
   }
 
+
+
   async function openSidecar(ctx: ExtensionContext, opts?: { focus?: boolean }): Promise<void> {
     let overlayTui: any = null;
     // 1 Hz countdown refresh while the panel is open — cheap under pi's
@@ -443,13 +445,14 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         void openSidecar(ctx, { focus: true }); // the focus key opens focused
         return;
       }
-      // Unfocused → focus. (Focused → the panel itself handles the chord
-      // and unfocuses — the editor would swallow it before this handler.)
+      // Visibility mode is a NON-capturing overlay (so opening never reflows
+      // the transcript). Real focus requires a capturing overlay — that is
+      // also what makes pi suppress the main prompt's cursor, leaving exactly
+      // one cursor on screen. So granting focus = reopen in capturing mode;
+      // the crew state lives in the manager, not the overlay, so nothing is lost.
       if (sidecar.handle && !sidecar.handle.isFocused?.()) {
         sidecar.handle.focus();
         sidecar.component.focused = true;
-        // The focus flag changes what the panel draws (input box, title) —
-        // request the repaint explicitly; nothing else will.
         sidecar.tui?.requestRender?.();
       }
     },
