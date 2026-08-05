@@ -746,12 +746,16 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   // ---------------------------------------------------------------- events
 
   /** True when the CURRENT session is itself a peer's session (resumed
-   *  standalone via `pi --session <peer file>`). */
+   *  standalone via `pi --session <peer file>`). Only real peer entries
+   *  count — a main session's OWN roster registration (kind "main",
+   *  peerSessionId = its own session id) must never match, or every /reload
+   *  would misclassify the main session as a standalone peer and skip the
+   *  panel machinery. Entries without a kind are legacy peers. */
   function standalonePeerEntry(ctx: ExtensionContext): any | null {
     try {
       const sid = (ctx as any).sessionManager?.getSessionId?.();
       if (!sid) return null;
-      return readRoster(ctx.cwd).find((e) => e.peerSessionId === sid) ?? null;
+      return readRoster(ctx.cwd).find((e) => e.kind !== "main" && e.peerSessionId === sid) ?? null;
     } catch {
       return null;
     }
