@@ -339,16 +339,9 @@ export class PeerManager {
     this.refreshRoster(cwd);
     appendEvent(cwd, "peer.session", { peer: name, peerSessionId: peer.sessionId, peerSessionFile: peer.sessionFile });
 
-    // Awareness notice in the main transcript (info — display only, no wake).
-    this.pi.sendMessage(
-      {
-        customType: "peer-notice",
-        content: `⇄ peer ${name} (${role.name}) is now watching — ${contextMode} context · tick ${Math.round(role.tick / 60)}m · ${peer.modelLabel}\n   resume standalone: pi --session ${peer.sessionFile}`,
-        display: true,
-      },
-      { deliverAs: "nextTurn" },
-    );
-
+    // No transcript entry on launch — appending one auto-scrolls the main
+    // transcript (operator complaint). The toast, panel, roster.json and
+    // AGENTS block carry the awareness; findings arrive attributed anyway.
     this.scheduleTick(peer, 100); // first tick almost immediately
     this.notify();
     return peer;

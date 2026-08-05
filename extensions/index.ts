@@ -40,19 +40,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     void openSidecar(ctx);
   }
 
-  /** Shortcut: closed → open · open+unfocused → focus · open+focused → close. */
+  /** ctrl+alt+p = SHOW/HIDE toggle (final operator ruling). Opening always
+   *  focuses; Esc hands keys back to the main prompt; /peers is the backup
+   *  open/close. */
   function shortcutToggle(ctx: ExtensionContext): void {
-    if (!ctx.hasUI) return;
-    if (!sidecar) {
-      void openSidecar(ctx);
-      return;
-    }
-    if (sidecar.handle && !sidecar.handle.isFocused?.()) {
-      sidecar.handle.focus();
-      sidecar.component.focused = true;
-    } else {
-      sidecar.close();
-    }
+    toggleSidecar(ctx);
   }
 
   /** Interactive launch (used by bare `/peer launch` and the sidecar's `l`). */
@@ -329,7 +321,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   });
 
   pi.registerShortcut(config.toggleKey as any, {
-    description: "peer sidecar: open → focus → close",
+    description: "peers panel: show/hide",
     handler: (ctx: ExtensionContext) => {
       track(ctx);
       shortcutToggle(ctx);
