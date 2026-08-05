@@ -372,7 +372,7 @@ export class PeerSidecar extends Container implements Focusable {
     }
     if (matchesKey(data, Key.escape)) {
       // Esc clears a draft first; on an empty input it CLOSES the panel
-      // (operator ruling). Handing keys to main without closing is ctrl+alt+o.
+      // (operator ruling). Handing keys to main without closing is ctrl+alt+l.
       if (this.input.getText().length > 0) {
         this.input.setText("");
         this.opts.requestRender();

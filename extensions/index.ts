@@ -251,7 +251,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
           // nonCapturing: showing the panel must NOT steal focus from the main
           // prompt. Focus-stealing changes the main layout (footer/hints), and
           // pi then reflows the WHOLE transcript -- in a long session that
-          // reflow reads as "it reloaded/scrolled". Ctrl+Alt+O grants focus
+          // reflow reads as "it reloaded/scrolled". Ctrl+Alt+L grants focus
           // deliberately; that is when a layout change is expected and wanted.
           overlayOptions: () => ({ ...overlayDims(overlayTui), nonCapturing: !opts?.focus }),
           onHandle: (handle: any) => {
