@@ -227,6 +227,16 @@ export class PeerSidecar {
     this.scroll.set(peer.name, next);
   }
 
+  /** External selection (peer_panel tool): select + expand a peer by name. */
+  selectPeer(name: string): boolean {
+    const idx = this.opts.getPeers().findIndex((p) => p.name === name);
+    if (idx === -1) return false;
+    this.selected = idx;
+    this.expanded.add(name);
+    this.opts.requestRender();
+    return true;
+  }
+
   handleInput(data: string): boolean {
     const peers = this.opts.getPeers();
     const peer = this.selectedPeer();

@@ -189,7 +189,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const lines = [
           `roles: ${roles.map((r) => `${r.name} (${r.source}, tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling})`).join(" · ") || "none found"}`,
           `active: ${manager.active.map((p) => `${p.name}[t${p.tickCount}${p.findings.length ? ` ◆${p.findings.length}` : ""}]`).join(" · ") || "none"}`,
-          `usage: /peer (toggle sidecar) · /peer launch <role> <task…> [--fork|--compacted|--fresh] · /peer stop <name|all> · /peer retask <name> <task…> · /peer broadcast <text…>`,
+          `usage: /peer (toggle sidecar) · /peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peer talk <name> <text…> · /peer stop <name|all> · /peer retask <name> <task…> · /peer broadcast <text…>`,
         ];
         ui?.notify?.(lines.join("\n"), "info");
         return;
@@ -320,23 +320,86 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   pi.registerTool({
     name: "peer_roster",
     label: "Peer roster",
-    description: "List available peer roles and currently active peers (addresses, tick state, findings).",
-    parameters: Type.Object({}),
-    async execute(_id: string, _params: any, _s: unknown, _u: unknown, ctx: any) {
+    description:
+      "List available peer roles and active peers. Pass name for the FULL picture of one peer: " +
+      "status, task, every finding with its body, recent activity, and the standalone resume command — " +
+      "the same view the human has in the peers panel.",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Peer callsign for deep detail (e.g. sentinel-1)." })),
+    }),
+    async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
+      if (params.name) {
+        const p = manager.peers.get(params.name);
+        if (!p || p.status === "stopped") {
+          return { content: [{ type: "text" as const, text: `No active peer named ${params.name}.` }] };
+        }
+        const etaS = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
+        const findings = p.findings.length
+          ? p.findings.map((f) => `  [tick ${f.tick} · ${f.priority}${f.clamped ? " (clamped)" : ""} · ${new Date(f.ts).toISOString()}]\n  ${f.body}`).join("\n\n")
+          : "  (none yet)";
+        const recent = p.pane.slice(-25).map((e) => `  ${e.kind === "user" ? "❯ " : ""}${e.text}`).join("\n") || "  (no activity)";
+        return {
+          content: [{
+            type: "text" as const,
+            text: [
+              `${p.name} (${p.role.name}) — ${p.status}`,
+              `address: ${p.address}`,
+              `task: ${p.task}`,
+              `tick: every ${Math.round(p.role.tick / 60)}m · completed ${p.tickCount} · next in ~${etaS >= 90 ? Math.ceil(etaS / 60) + "m" : etaS + "s"} · quiet streak ${p.quietStreak}`,
+              `context: ${p.contextMode} · model: ${p.modelLabel}`,
+              `session: ${p.sessionId}`,
+              `resume standalone: pi --session ${p.sessionFile}`,
+              ``,
+              `FINDINGS (${p.findings.length}):`,
+              findings,
+              ``,
+              `RECENT ACTIVITY:`,
+              recent,
+            ].join("\n"),
+          }],
+        };
+      }
       const roles = discoverRoles(ctx.cwd)
         .map((r) => `- ${r.name} (${r.source}): ${r.description} [tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling}, ${r.context}]`)
         .join("\n");
       const active = manager.active
-        .map((p) => `- ${p.name} (${p.role.name}) ${p.address} · tick ${p.tickCount} · ${p.status} · findings ${p.findings.length} · task: ${p.task}`)
+        .map((p) => `- ${p.name} (${p.role.name}) · ${p.status} · tick ${p.tickCount} · findings ${p.findings.length} · task: ${p.task}`)
         .join("\n");
       const persisted = readRoster(ctx.cwd);
       return {
         content: [{
           type: "text" as const,
-          text: `ROLES:\n${roles || "(none)"}\n\nACTIVE PEERS:\n${active || "(none)"}${persisted.length && !manager.active.length ? `\n\nroster.json lists ${persisted.length} peers from a previous run` : ""}`,
+          text: `ROLES:\n${roles || "(none)"}\n\nACTIVE PEERS (peer_roster with name for full detail):\n${active || "(none)"}${persisted.length && !manager.active.length ? `\n\nroster.json lists ${persisted.length} peers from a previous run` : ""}`,
         }],
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "peer_panel",
+    label: "Peer panel",
+    description:
+      "Control the human-visible peers panel: open it (optionally focused on one peer) or close it. " +
+      "Use to surface a peer's live pane to the human — e.g. after a finding worth their eyes.",
+    parameters: Type.Object({
+      action: Type.String({ description: "open | close" }),
+      peer: Type.Optional(Type.String({ description: "Peer callsign to select + expand when opening." })),
+    }),
+    async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
+      track(ctx);
+      if (!ctx.hasUI) return { content: [{ type: "text" as const, text: "No interactive UI in this session mode." }] };
+      if (params.action === "close") {
+        if (sidecar) sidecar.close();
+        return { content: [{ type: "text" as const, text: "Panel closed." }] };
+      }
+      if (!sidecar) void openSidecar(lastCtx ?? ctx);
+      // Selection may need the panel a beat to mount.
+      const target = params.peer;
+      if (target) {
+        setTimeout(() => sidecar?.component.selectPeer(target), 300);
+      }
+      return { content: [{ type: "text" as const, text: `Panel opened${target ? ` on ${target}` : ""}.` }] };
     },
   });
 
