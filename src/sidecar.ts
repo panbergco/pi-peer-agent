@@ -34,6 +34,10 @@ import type { Peer } from "./runtime.js";
 import type { PeerRole } from "./types.js";
 import { shortId } from "./types.js";
 
+function fmtTok(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 type Theme = { fg(role: string, text: string): string; bold?(text: string): string };
@@ -545,7 +549,7 @@ export class PeerSidecar extends Container implements Focusable {
     const status = this.flash
       ? this.safeFg("warning", ` ${this.flash}`)
       : sel
-        ? this.safeFg("dim", truncateToWidth(` ${sel.modelLabel} · id ${shortId(sel.sessionId)} · ${sel.contextMode} · tick ${Math.round(sel.role.tick / 60)}m · ${sel.status}${scrollInfo} · task: ${sel.task}`, inner))
+        ? this.safeFg("dim", truncateToWidth(` ${sel.modelLabel} · id ${shortId(sel.sessionId)} · ${sel.contextMode} · tick ${Math.round(sel.role.tick / 60)}m · ${sel.status} · ↑${fmtTok(sel.usage.input)} ↓${fmtTok(sel.usage.output)} $${sel.usage.costUsd.toFixed(2)}${scrollInfo} · task: ${sel.task}`, inner))
         : this.safeFg("dim", " launch a peer to begin");
     lines.push(this.frameLine(status, inner));
     lines.push(...inputLines);

@@ -35,6 +35,8 @@ export interface Peer {
   pendingReceipts: string[];
   /** Watch directory: file tools rooted here when set (E1, spec 12.1). */
   watchCwd?: string;
+  /** Cumulative usage across ticks + talks (E2): a watch has a visible bill. */
+  usage: { input: number; output: number; costUsd: number };
   unsub: (() => void) | null;
   startedAt: string;
 }
@@ -216,6 +218,7 @@ export class PeerManager {
       tickBaseS: p.role.tick,
       status: p.status,
       startedAt: p.startedAt,
+      usage: { input: p.usage.input, output: p.usage.output, costUsd: Number(p.usage.costUsd.toFixed(6)) },
       ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
     writeRoster(cwd, entries);
@@ -323,6 +326,7 @@ export class PeerManager {
       tickBaseS: p.role.tick,
       status: "suspended" as PeerStatus,
       startedAt: p.startedAt,
+      usage: { input: p.usage.input, output: p.usage.output, costUsd: Number(p.usage.costUsd.toFixed(6)) },
       ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
     if (entries.length > 0) writeRoster(cwd, entries);
@@ -387,6 +391,7 @@ export class PeerManager {
           watermark: ((ctx as any).sessionManager?.getEntries?.() ?? []).length,
           pane: [], findings: [], pendingRetask: null, pendingReceipts: [], unsub: null,
           startedAt: entry.startedAt,
+          usage: entry.usage ? { ...entry.usage } : { input: 0, output: 0, costUsd: 0 },
           ...(entry.watchCwd ? { watchCwd: entry.watchCwd } : {}),
         };
         // Callsign counter continuity (sentinel-2 must not collide).
@@ -487,6 +492,7 @@ export class PeerManager {
       name, role, task, contextMode,
       modelLabel: model ? `${model.provider}/${model.id}` : "default",
       address, session,
+      usage: { input: 0, output: 0, costUsd: 0 },
       ...(watchCwd ? { watchCwd } : {}),
       sessionId: sm.getSessionId?.() ?? "unknown",
       sessionFile: sm.getSessionFile?.() ?? "(in-memory)",
@@ -610,6 +616,7 @@ export class PeerManager {
     parts.push(delta ? `DELTA — what the main agent did since your last look:\n${delta}` : `No conversation delta this tick.`);
     parts.push(`End with your verdict line (QUIET or FINDING[…]: …).`);
 
+    const usageFrom = (peer.session.state?.messages ?? []).length;
     try {
       await peer.session.prompt(parts.join("\n\n"));
       let text = this.lastAssistantText(peer);
@@ -630,6 +637,7 @@ export class PeerManager {
       appendEvent(cwd, "peer.error", { peer: peer.name, tick: peer.tickCount, error: String(err).slice(0, 300) });
       peer.pane.push({ kind: "note", text: `tick errored (will retry): ${String(err).slice(0, 100)}` });
     } finally {
+      this.accountUsage(peer, usageFrom, "tick", cwd);
       peer.busy = false;
       if ((peer.status as PeerStatus) !== "stopped") {
         if (peer.status !== "error") peer.status = "waiting";
@@ -638,6 +646,30 @@ export class PeerManager {
       }
       this.notify();
     }
+  }
+
+  /** Sum usage of assistant messages from index `fromIdx`; accumulate on the
+   *  peer and ledger it (E2). Defensive: providers differ in fields. */
+  private accountUsage(peer: Peer, fromIdx: number, kind: "tick" | "talk", cwd: string): void {
+    const msgs: any[] = peer.session.state?.messages ?? [];
+    let inp = 0, out = 0, cost = 0;
+    for (let i = fromIdx; i < msgs.length; i++) {
+      const m = msgs[i];
+      if (m?.role !== "assistant") continue;
+      const u = m.usage ?? {};
+      inp += (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+      out += u.output ?? 0;
+      cost += u.cost?.total ?? 0;
+    }
+    if (inp === 0 && out === 0 && cost === 0) return;
+    peer.usage.input += inp;
+    peer.usage.output += out;
+    peer.usage.costUsd += cost;
+    appendEvent(cwd, "peer.usage", {
+      peer: peer.name, exchange: kind, tick: peer.tickCount,
+      input: inp, output: out, costUsd: Number(cost.toFixed(6)),
+      totalInput: peer.usage.input, totalOutput: peer.usage.output, totalCostUsd: Number(peer.usage.costUsd.toFixed(6)),
+    });
   }
 
   private lastAssistantText(peer: Peer): string {
@@ -788,6 +820,8 @@ export class PeerManager {
         }
       }
       appendEvent(this.ctx?.cwd ?? process.cwd(), "talk.replied", { peer: name, from, chars: reply.length });
+      this.accountUsage(peer, before, "talk", this.ctx?.cwd ?? process.cwd());
+      this.refreshRoster(this.ctx?.cwd ?? process.cwd());
       // A FINDING line in a talk reply is a real push: deliver it to the main
       // agent like a tick finding (this is the peer's on-demand relay channel).
       // Operator authority outranks the role ceiling for these: a human-

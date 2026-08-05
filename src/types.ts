@@ -93,6 +93,8 @@ export interface RosterEntry {
   startedAt: string;
   /** Watch directory (E1): peer file tools rooted here when set. */
   watchCwd?: string;
+  /** Cumulative usage (E2): tokens + cost across ticks and talks. */
+  usage?: { input: number; output: number; costUsd: number };
 }
 
 /** Simple monotonic-ish unique id (time + random) — ledger/envelope ids. */

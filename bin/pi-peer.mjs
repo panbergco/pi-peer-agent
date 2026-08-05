@@ -129,8 +129,9 @@ async function main() {
         return;
       }
       for (const e of roster) {
+        const u = e.usage ? ` ↑${e.usage.input} ↓${e.usage.output} $${e.usage.costUsd.toFixed(3)}` : "";
         console.log(
-          `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${String(e.status).padEnd(10)} tick ${String(Math.round((e.tickBaseS ?? 300) / 60) + "m").padEnd(5)} ${e.task}`,
+          `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${String(e.status).padEnd(10)} tick ${String(Math.round((e.tickBaseS ?? 300) / 60) + "m").padEnd(5)}${u} · ${e.task}`,
         );
       }
       return;

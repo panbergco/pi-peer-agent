@@ -522,6 +522,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               `address: ${p.address}`,
               `task: ${p.task}`,
               `tick: every ${Math.round(p.role.tick / 60)}m · completed ${p.tickCount} · next in ~${etaS >= 90 ? Math.ceil(etaS / 60) + "m" : etaS + "s"} · quiet streak ${p.quietStreak}`,
+              `usage: ${p.usage.input} in · ${p.usage.output} out · $${p.usage.costUsd.toFixed(4)}`,
               `context: ${p.contextMode} · model: ${p.modelLabel}`,
               `session: ${p.sessionId}`,
               `resume standalone: pi --session ${p.sessionFile}`,
