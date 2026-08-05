@@ -188,8 +188,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             requestRender: () => tui.requestRender(),
           });
           manager.onUpdate = () => tui.requestRender();
+          // Repaint ONLY when the visible countdown text actually changes
+          // (once a second while showing seconds, once a MINUTE while
+          // showing minutes) — blanket 1Hz repaints read as flicker.
+          let lastSig = "";
           countdown = setInterval(() => {
-            if (manager.active.length > 0) tui.requestRender();
+            const sig = manager.active
+              .map((p) => {
+                const s = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
+                return `${p.name}:${p.busy ? "busy" : s >= 90 ? `${Math.ceil(s / 60)}m` : `${s}s`}`;
+              })
+              .join("|");
+            if (sig !== lastSig) {
+              lastSig = sig;
+              tui.requestRender();
+            }
           }, 1000);
           sidecar = { component, handle: null, close: () => done(undefined) };
           return component as any;

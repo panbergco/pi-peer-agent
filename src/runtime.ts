@@ -176,7 +176,7 @@ export class PeerManager {
   }
 
   /** Throttled: streaming fires per token, but the TUI repaints at most
-   *  ~12 fps — token-rate full re-renders read as flicker. */
+   *  ~6 fps — higher rates on a large overlay read as flicker. */
   private notify(): void {
     if (this.renderPending) return;
     this.renderPending = true;
@@ -187,7 +187,7 @@ export class PeerManager {
       } catch {
         /* sidecar must never break the runtime */
       }
-    }, 80);
+    }, 160);
   }
 
   private refreshRoster(cwd: string): void {
