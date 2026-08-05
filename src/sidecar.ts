@@ -8,6 +8,7 @@
 
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Peer } from "./runtime.js";
+import type { PeerRole } from "./types.js";
 import { shortId } from "./types.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -16,10 +17,12 @@ type Theme = { fg(role: string, text: string): string };
 
 export interface SidecarOptions {
   getPeers: () => Peer[];
+  getRoles: () => PeerRole[];
   theme: Theme;
   onClose: () => void;
   onUnfocus: () => void;
   onStop: (name: string) => void;
+  onLaunch: () => void;
   insertText: (text: string) => void;
   yankText: (text: string, label: string) => void;
   requestRender: () => void;
@@ -79,21 +82,25 @@ export class PeerSidecar {
         }
         continue;
       }
+      // Streaming cursor is budgeted INSIDE the width so it can never push
+      // a line past the right border.
       const cursor = entry.streaming ? fg(t, "warning", " ▍") : "";
+      const bodyWidth = entry.streaming ? width - 2 : width;
       if (entry.kind === "thinking") {
-        for (const l of wrapTextWithAnsi(entry.text, width)) lines.push(fg(t, "dim", l));
-        if (cursor) lines[lines.length - 1] += cursor;
+        const wrapped = wrapTextWithAnsi(entry.text, bodyWidth);
+        for (const l of wrapped) lines.push(fg(t, "dim", l));
+        if (cursor && lines.length) lines[lines.length - 1] = truncateToWidth(lines[lines.length - 1]!, width - 2) + cursor;
       } else if (entry.kind === "tool") {
-        lines.push(fg(t, "dim", `⚙ ${truncateToWidth(entry.text, width - 3)}`) + cursor);
+        lines.push(fg(t, "dim", `» ${truncateToWidth(entry.text, width - 5)}`) + cursor);
       } else if (entry.kind === "finding") {
         const color = entry.priority === "interrupt" ? "error" : entry.priority === "steering" ? "accent" : "dim";
         lines.push(fg(t, color, `◆ FINDING ${entry.priority ?? ""}`));
         for (const l of wrapTextWithAnsi(entry.text, width - 2)) lines.push(fg(t, color, `  ${l}`));
       } else if (entry.kind === "note") {
-        lines.push(fg(t, "warning", truncateToWidth(`✦ ${entry.text}`, width)));
+        lines.push(fg(t, "warning", truncateToWidth(`! ${entry.text}`, width)));
       } else {
-        for (const l of wrapTextWithAnsi(entry.text, width)) lines.push(l);
-        if (cursor && lines.length) lines[lines.length - 1] += cursor;
+        for (const l of wrapTextWithAnsi(entry.text, bodyWidth)) lines.push(l);
+        if (cursor && lines.length) lines[lines.length - 1] = truncateToWidth(lines[lines.length - 1]!, width - 2) + cursor;
       }
     }
     return lines;
@@ -102,6 +109,8 @@ export class PeerSidecar {
   render(width: number): string[] {
     const t = this.opts.theme;
     const peers = this.opts.getPeers();
+    // Selection stays in bounds even when peers stop underneath it.
+    if (this.selected >= peers.length) this.selected = Math.max(0, peers.length - 1);
     const inner = Math.max(20, width - 2);
     // Viewport budget: overlay rows minus chrome (title, separator, hints,
     // border) and per-peer header/detail/resume rows — the rest is pane space
@@ -110,10 +119,14 @@ export class PeerSidecar {
     const expandedCount = Math.max(1, [...this.expanded].length);
     this.paneHeight = Math.max(8, Math.floor((this.opts.getMaxRows() - chrome) / expandedCount));
     const out: string[] = [];
-    const bar = (s: string) => fg(t, "dim", s);
+    // Operator override of the theme-only rule: the OUTER frame is deep purple
+    // so the sidecar unmistakably reads as an overlay floating above the
+    // session. Bright purple = keys go HERE; dark purple = keys are back in
+    // your editor (panel just watching). fg-only escape so no attrs leak.
+    const bar = (s: string) => `\x1b[38;5;${this.focused ? 135 : 54}m${s}\x1b[39m`;
 
-    const title = ` ⇄ PEERS · ${peers.length} watching `;
-    const pad = Math.max(0, inner - visibleWidth(title) - 2);
+    const title = ` PEERS · ${peers.length} watching `;
+    const pad = Math.max(0, inner - visibleWidth(title) - 1);
     out.push(bar("╭─") + fg(t, "accent", title) + bar("─".repeat(pad) + "╮"));
 
     const row = (content: string) => {
@@ -123,7 +136,27 @@ export class PeerSidecar {
     };
 
     if (peers.length === 0) {
-      row(fg(t, "dim", "  no peers yet — /peer launch <role> <task…>"));
+      // Empty state: make the panel worth opening — what peers are, which
+      // roles exist, and the one key that starts everything.
+      row("");
+      row("  " + fg(t, "accent", "No peers watching yet."));
+      row("");
+      row(fg(t, "dim", "  A peer is a partner agent living in this session: it wakes every few"));
+      row(fg(t, "dim", "  seconds, inspects what the main agent just did, and pushes a finding"));
+      row(fg(t, "dim", "  into the conversation the moment something is wrong. Each peer is a"));
+      row(fg(t, "dim", "  real pi session you can resume in any terminal."));
+      row("");
+      row("  " + fg(t, "accent", "press l to launch one") + fg(t, "dim", "   (or /peer launch <role> <task…>)"));
+      row("");
+      const roles = this.opts.getRoles();
+      if (roles.length > 0) {
+        row(fg(t, "dim", "  available roles:"));
+        for (const r of roles.slice(0, 8)) {
+          row("    " + fg(t, "accent", r.name) + fg(t, "dim", ` — ${truncateToWidth(r.description, Math.max(10, inner - r.name.length - 8))}`));
+          row(fg(t, "dim", `      tick ${r.tick}s · up to ${r.priorityCeiling} · ${r.context} context · ${r.source}`));
+        }
+      }
+      row("");
     }
 
     peers.forEach((peer, i) => {
@@ -135,7 +168,7 @@ export class PeerSidecar {
         : peer.status === "stopped" ? fg(t, "dim", "○")
         : fg(t, "dim", "●");
       const secs = Math.max(0, Math.round((peer.nextTickAt - Date.now()) / 1000));
-      const tickInfo = peer.busy ? "thinking" : peer.status === "stopped" ? "stopped" : `⟳ ${secs}s`;
+      const tickInfo = peer.busy ? "thinking" : peer.status === "stopped" ? "stopped" : `next ${secs}s`;
       const head =
         `${sel && this.focused ? fg(t, "accent", "❯") : " "} ${open ? "▾" : "▸"} ${dot} ` +
         `${sel ? fg(t, "accent", peer.name) : peer.name} ` +
@@ -143,7 +176,7 @@ export class PeerSidecar {
       row(truncateToWidth(head, inner));
 
       if (open) {
-        row(fg(t, "dim", `   ⬢ ${peer.modelLabel} · ⌏ ${shortId(peer.sessionId)} · ${peer.contextMode} · ${peer.role.tick}s base`));
+        row(fg(t, "dim", `   ${peer.modelLabel} · id ${shortId(peer.sessionId)} · ${peer.contextMode} · ${peer.role.tick}s base`));
         const paneW = inner - 4;
         const all = this.paneLines(peer, paneW, t);
         const off = this.scroll.get(peer.name) ?? 0;
@@ -155,14 +188,14 @@ export class PeerSidecar {
           const pos = off === 0 ? "tail" : `-${off}`;
           row(fg(t, "dim", `   └ ${start > 0 ? "↑ " : ""}${all.length} lines · ${pos}${off > 0 ? " · ↓ to follow" : ""}`));
         }
-        row(fg(t, "dim", truncateToWidth(`   ⏻ pi --session ${peer.sessionFile}`, inner)));
+        row(fg(t, "dim", truncateToWidth(`   resume: pi --session ${peer.sessionFile}`, inner)));
       }
     });
 
     out.push(bar("├" + "─".repeat(inner) + "┤"));
     const hints = this.focused
-      ? " ↑↓ pick · ⏎ open/close · PgUp/PgDn scroll · i insert · y/Y yank · r resume · x stop · q hide · esc back "
-      : " ctrl+alt+p focus · /peer ";
+      ? " ↑↓ pick · ⏎ open · l launch · i insert · y/Y yank · r resume · x stop · q close · esc → type in main prompt (panel stays) "
+      : " panel stays open · your typing goes to the main prompt · /peer close · ctrl+alt+p focus panel ";
     row(fg(t, "dim", truncateToWidth(hints, inner)));
     out.push(bar("╰" + "─".repeat(inner) + "╯"));
     return out;
@@ -228,6 +261,8 @@ export class PeerSidecar {
       }
     } else if (data === "r") {
       if (peer) this.opts.yankText(`pi --session ${peer.sessionFile}`, "resume command");
+    } else if (data === "l") {
+      this.opts.onLaunch();
     } else if (data === "x") {
       if (peer) this.opts.onStop(peer.name);
     } else if (data === "q") {

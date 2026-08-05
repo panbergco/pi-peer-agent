@@ -29,18 +29,55 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   // ------------------------------------------------------------- sidecar
 
+  /** Bare /peer: strict open/close toggle — closing must ALWAYS work,
+   *  regardless of focus state. */
   function toggleSidecar(ctx: ExtensionContext): void {
     if (!ctx.hasUI) return;
     if (sidecar) {
-      if (sidecar.handle && !sidecar.handle.isFocused?.()) {
-        sidecar.handle.focus();
-        sidecar.component.focused = true;
-      } else {
-        sidecar.close();
-      }
+      sidecar.close();
       return;
     }
     void openSidecar(ctx);
+  }
+
+  /** Shortcut: closed → open · open+unfocused → focus · open+focused → close. */
+  function shortcutToggle(ctx: ExtensionContext): void {
+    if (!ctx.hasUI) return;
+    if (!sidecar) {
+      void openSidecar(ctx);
+      return;
+    }
+    if (sidecar.handle && !sidecar.handle.isFocused?.()) {
+      sidecar.handle.focus();
+      sidecar.component.focused = true;
+    } else {
+      sidecar.close();
+    }
+  }
+
+  /** Interactive launch (used by bare `/peer launch` and the sidecar's `l`). */
+  async function interactiveLaunch(ctx: ExtensionContext): Promise<void> {
+    const ui: any = ctx.ui;
+    if (!ui?.select) return;
+    const roles = discoverRoles(ctx.cwd);
+    if (roles.length === 0) {
+      ui.notify?.("no peer roles found (peers/*.md)", "error");
+      return;
+    }
+    const pick = await ui.select("Peer role", roles.map((r) => `${r.name} — ${r.description}`));
+    if (!pick) return;
+    const role = roles.find((r) => pick.startsWith(r.name));
+    if (!role) return;
+    const task = (await ui.input("Standing task for this peer", role.description)) || role.description || "watch the main agent's work per your charter";
+    const modePick = await ui.select("Context for the peer", [
+      `compacted — summary of this conversation so far${role.context === "compacted" ? " (role default)" : ""}`,
+      `fork — full copy of this session's history${role.context === "fork" ? " (role default)" : ""}`,
+      `fresh — blank slate${role.context === "fresh" ? " (role default)" : ""}`,
+    ]);
+    const mode = modePick?.split(" ")[0] as any;
+    const peer = await manager.launch(ctx, role, task, mode);
+    ui.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${role.tick}s)`, "info");
+    if (!sidecar) void openSidecar(ctx);
   }
 
   /** btw's resolveBtwModalDimensions pattern: ratio of the live terminal,
@@ -49,8 +86,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   function overlayDims(tui: any) {
     const cols = Math.max(40, Number(tui?.terminal?.columns) || 120);
     const rows = Math.max(12, Number(tui?.terminal?.rows) || 36);
-    const width = Math.max(80, Math.min(180, Math.floor(cols * config.overlayWidthRatio), cols - 2));
-    const maxHeight = Math.max(20, Math.min(Math.floor(rows * config.overlayHeightRatio), rows - 2));
+    // Clamp by the terminal LAST — the overlay must never exceed the screen.
+    const width = Math.min(cols - 2, Math.max(80, Math.min(180, Math.floor(cols * config.overlayWidthRatio))));
+    const maxHeight = Math.min(rows - 2, Math.max(20, Math.floor(rows * config.overlayHeightRatio)));
     return { anchor: "center" as const, width, maxHeight, margin: 1, nonCapturing: true as const };
   }
 
@@ -62,6 +100,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
           overlayTui = tui;
           const component = new PeerSidecar({
             getPeers: () => manager.active,
+            getRoles: () => discoverRoles(ctx.cwd),
             theme,
             onClose: () => done(undefined),
             onUnfocus: () => {
@@ -71,6 +110,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             },
             onStop: (name: string) => {
               void manager.stop(name).then(() => tui.requestRender());
+            },
+            onLaunch: () => {
+              sidecar?.handle?.unfocus?.();
+              if (sidecar) sidecar.component.focused = false;
+              void interactiveLaunch(lastCtx ?? ctx);
             },
             insertText: (text: string) => {
               const ui: any = (lastCtx ?? ctx).ui;
@@ -146,7 +190,6 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
       if (verb === "launch") {
         const roles = discoverRoles(ctx.cwd);
-        let roleName = rest[0];
         let taskWords = rest.slice(1);
         let mode: any;
         taskWords = taskWords.filter((w) => {
@@ -156,24 +199,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
           }
           return true;
         });
-        if (!roleName && ui?.select) {
-          roleName = await ui.select(
-            "Peer role",
-            roles.map((r) => `${r.name} — ${r.description}`),
-          );
-          roleName = roleName?.split(" — ")[0];
+        if (!rest[0]) {
+          await interactiveLaunch(ctx);
+          return;
         }
-        const role = roles.find((r) => r.name === roleName);
+        const role = roles.find((r) => r.name === rest[0]);
         if (!role) {
-          ui?.notify?.(`unknown role "${roleName ?? ""}" — /peer list shows what exists`, "error");
+          ui?.notify?.(`unknown role "${rest[0]}" — /peer list shows what exists`, "error");
           return;
         }
         let task = taskWords.join(" ");
         if (!task && ui?.input) task = (await ui.input("Standing task for this peer", role.description)) ?? "";
         if (!task) task = role.description || "watch the main agent's work per your charter";
         const peer = await manager.launch(ctx, role, task, mode);
-        ui?.notify?.(`⇄ ${peer.name} launched (${peer.contextMode}, tick ${role.tick}s) — ${peer.sessionId}`, "info");
-        if (!sidecar) toggleSidecar(ctx);
+        ui?.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${role.tick}s) — ${peer.sessionId}`, "info");
+        if (!sidecar) void openSidecar(ctx);
         return;
       }
 
@@ -209,10 +249,10 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   });
 
   pi.registerShortcut(config.toggleKey as any, {
-    description: "toggle the peer sidecar",
+    description: "peer sidecar: open → focus → close",
     handler: (ctx: ExtensionContext) => {
       track(ctx);
-      toggleSidecar(ctx);
+      shortcutToggle(ctx);
     },
   });
 
