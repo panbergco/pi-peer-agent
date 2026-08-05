@@ -534,7 +534,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         }
         const etaS = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
         const findings = p.findings.length
-          ? p.findings.map((f) => `  [tick ${f.tick} · ${f.priority}${f.clamped ? " (clamped)" : ""} · ${new Date(f.ts).toISOString()}]\n  ${f.body}`).join("\n\n")
+          ? p.findings.map((f) => `  [tick ${f.tick} · ${f.priority}${f.clamped ? " (clamped)" : ""} · ${new Date(f.ts).toISOString()}]${f.refs?.length ? `\n  refs: ${f.refs.join(", ")}` : ""}\n  ${f.body}`).join("\n\n")
           : "  (none yet)";
         const recent = p.pane.slice(-25).map((e) => `  ${e.kind === "user" ? "❯ " : ""}${e.text}`).join("\n") || "  (no activity)";
         return {

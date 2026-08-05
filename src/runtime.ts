@@ -51,6 +51,20 @@ function textOfBlocks(content: unknown): string {
     .join("");
 }
 
+/** Split a finding body into prose + referenced files (E4).
+ *  A trailing `REFS: a.ts, dir/b.md` line names what the finding is ABOUT, giving
+ *  consumers mechanical targets. Paths must be repo-relative: absolute paths and
+ *  traversal are dropped (a finding can never point a consumer outside the tree). */
+export function splitRefs(body: string): { body: string; refs: string[] } {
+  const m = body.match(/\n?\s*REFS\s*:\s*([^\n]*)\s*$/i);
+  if (!m) return { body, refs: [] };
+  const refs = (m[1] ?? "")
+    .split(/[,\s]+/)
+    .map((p) => p.trim().replace(/^['"`]|['"`,.]+$/g, ""))
+    .filter((p) => p.length > 0 && !p.startsWith("/") && !p.split("/").includes("..") && !p.includes("\0"));
+  return { body: body.slice(0, m.index).trim(), refs: [...new Set(refs)] };
+}
+
 /** Serialize parent-session entries appended since the watermark (spec §6.2). */
 function serializeDelta(entries: any[], from: number, cap: number): string {
   const parts: string[] = [];
@@ -101,7 +115,9 @@ operator or the main agent ends your watch.
 DIRECT MESSAGES: replies stay private between you and the sender UNLESS you end the reply with a
 FINDING[...] line — that is your ONLY way to push something to the main agent on demand (e.g. when
 asked to relay or alert). You have no other relay mechanism; never claim to have delivered anything
-without emitting that line. Delivery receipts for your findings arrive in your next tick prompt;
+without emitting that line. If your finding is ABOUT specific files, end it with a line: REFS: path/one.ts, path/two.md
+(repo-relative paths, comma-separated) — they are parsed out as machine-readable targets and
+stripped from your prose. Delivery receipts for your findings arrive in your next tick prompt;
 you can also verify any delivery yourself in .pi/peer-agent/events.jsonl (finding.delivered).`;
 
 export class PeerManager {
@@ -715,12 +731,17 @@ export class PeerManager {
     // Operator-relay floor: "tell the main agent X" means deliver NOW — an
     // info-priority relay would sit silently until the next natural turn.
     if (authority?.floor && priorityRank(priority) < priorityRank(authority.floor)) priority = authority.floor;
-    const body = (m[3] ?? "").trim().slice(0, 4000);
+    const raw = (m[3] ?? "").trim().slice(0, 4000);
+    if (!raw) return;
+    const { body, refs } = splitRefs(raw);
     if (!body) return;
 
     peer.quietStreak = 0;
     peer.backoffIdx = 0;
-    const finding: Finding = { id: uid(), peer: peer.name, priority, clamped, tick: peer.tickCount, body, ts: Date.now() };
+    const finding: Finding = {
+      id: uid(), peer: peer.name, priority, clamped, tick: peer.tickCount, body, ts: Date.now(),
+      ...(refs.length > 0 ? { refs } : {}),
+    };
     peer.findings.push(finding);
     peer.pane.push({ kind: "finding", text: body, priority });
     this.deliver(peer, finding, cwd);
@@ -728,7 +749,7 @@ export class PeerManager {
 
   /** MACP §8 mapped delivery (spec §7). */
   private deliver(peer: Peer, finding: Finding, cwd: string): void {
-    const header = `[peer-agent] finding from ${peer.address} (${finding.priority}${finding.clamped ? ", clamped" : ""}) · tick ${finding.tick} · id ${finding.id}`;
+    const header = `[peer-agent] finding from ${peer.address} (${finding.priority}${finding.clamped ? ", clamped" : ""}) · tick ${finding.tick} · id ${finding.id}${finding.refs?.length ? ` · refs: ${finding.refs.join(", ")}` : ""}`;
     const content = `${header}\n\n${finding.body}`;
     try {
       if (finding.priority === "interrupt") {
@@ -741,7 +762,7 @@ export class PeerManager {
         // info: appended at the next natural boundary; never wakes (D-08).
         this.pi.sendMessage({ customType: "peer-finding", content, display: true }, { deliverAs: "nextTurn" });
       }
-      appendEvent(cwd, "finding.delivered", { peer: peer.name, id: finding.id, priority: finding.priority, clamped: finding.clamped, tick: finding.tick, body: finding.body.slice(0, 2000) });
+      appendEvent(cwd, "finding.delivered", { peer: peer.name, id: finding.id, priority: finding.priority, clamped: finding.clamped, tick: finding.tick, body: finding.body.slice(0, 2000), ...(finding.refs?.length ? { refs: finding.refs } : {}) });
       // Delivery receipt: the peer learns on its next tick that this landed
       // (its own suggestion — relayed through the very channel it improves).
       peer.pendingReceipts.push(`finding ${finding.id} (${finding.priority}) delivered to the main agent at ${new Date().toISOString()}`);

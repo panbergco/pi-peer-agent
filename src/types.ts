@@ -48,6 +48,8 @@ export interface Finding {
   tick: number;
   body: string;
   ts: number;
+  /** Files this finding is about (E4), parsed from a trailing REFS: line. */
+  refs?: string[];
 }
 
 export interface PeerConfig {
