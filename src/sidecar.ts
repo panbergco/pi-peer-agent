@@ -279,10 +279,11 @@ export class PeerSidecar extends Container implements Focusable {
   private titleLine(inner: number): string {
     const peers = this.opts.getPeers();
     const sel = this.selectedPeer();
-    const title = ` PEERS · ${peers.length} watching${sel ? ` · ${sel.name}` : ""} `;
+    const focus = this._focused ? " ⌨ typing captured here ·" : "";
+    const title = ` PEERS · ${peers.length} watching${sel ? ` · ${sel.name}` : ""}${focus} `;
     const text = truncateToWidth(title, Math.max(1, inner - 2), "…");
     const right = Math.max(0, inner - 2 - visibleWidth(text));
-    return `${this.purple("╭──")}${this.safeFg("accent", text)}${this.purple(`${"─".repeat(right)}╮`)}`;
+    return `${this.purple("╭──")}${this.safeFg(this._focused ? "accent" : "dim", text)}${this.purple(`${"─".repeat(right)}╮`)}`;
   }
 
   private paneLines(peer: Peer, width: number): string[] {
@@ -386,9 +387,15 @@ export class PeerSidecar extends Container implements Focusable {
     // Fixed geometry: everything except the viewport is chrome; the viewport
     // absorbs the rest and is padded, so total height NEVER changes between
     // renders (no drifting with background content).
-    const inputLines = this.inputFrameLines(dialogWidth);
+    // FOCUS AFFORDANCE: only a FOCUSED panel has an input box at all — an
+    // editor cursor in the panel therefore always means "keys go here".
+    // Unfocused, the input area is one dim hint line.
+    const inputLines = this._focused
+      ? this.inputFrameLines(dialogWidth)
+      : [this.frameLine(this.safeFg("dim", " ⌨ ctrl+alt+p to type to peers — your typing goes to the MAIN prompt"), inner)];
+    const listChrome = listLines.length > 0 ? listLines.length + 1 : 0; // list + its rule (skipped entirely at 0 peers)
     const statusLines = 1;
-    const chrome = 1 + listLines.length + 1 + statusLines + 1 + inputLines.length + 1 + 1; // title, list, rule, status, rule, input, hints, bottom
+    const chrome = 1 + listChrome + statusLines + 1 + inputLines.length + 1 + 1; // title, list+rule, status, rule, input, hints, bottom
     const maxRows = Math.max(16, this.opts.getMaxRows());
     const vh = Math.max(4, maxRows - chrome);
     this.viewportHeight = vh;
@@ -410,9 +417,10 @@ export class PeerSidecar extends Container implements Focusable {
     const padCount = Math.max(0, vh - visible.length);
 
     const lines: string[] = [this.titleLine(inner)];
-    for (const l of listLines) lines.push(this.frameLine(l, inner));
-    if (listLines.length === 0) lines.push(this.frameLine(this.safeFg("dim", " (no peers — see below)"), inner));
-    lines.push(this.ruleLine(inner));
+    if (listLines.length > 0) {
+      for (const l of listLines) lines.push(this.frameLine(l, inner));
+      lines.push(this.ruleLine(inner));
+    }
     for (const l of visible) lines.push(this.frameLine(l ? ` ${l}` : "", inner));
     for (let i = 0; i < padCount; i++) lines.push(this.frameLine("", inner));
     lines.push(this.ruleLine(inner));

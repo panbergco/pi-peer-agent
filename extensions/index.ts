@@ -89,7 +89,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     // Clamp by the terminal LAST — the overlay must never exceed the screen.
     const width = Math.min(cols - 2, Math.max(80, Math.min(180, Math.floor(cols * config.overlayWidthRatio))));
     const maxHeight = Math.min(rows - 2, Math.max(20, Math.floor(rows * config.overlayHeightRatio)));
-    return { anchor: "center" as const, width, maxHeight, margin: 1, nonCapturing: true as const };
+    // top-center anchor ONLY (no row/margin interplay): the panel's position
+    // never depends on its content height. maxHeight includes crop headroom —
+    // the component renders 3 rows fewer than this budget, so the bottom
+    // border survives the overlay's own accounting.
+    return { anchor: "top-center" as const, offsetY: 1, width, maxHeight, nonCapturing: true as const };
   }
 
   async function openSidecar(ctx: ExtensionContext): Promise<void> {
@@ -107,7 +111,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             keybindings: kb ?? { matches: () => false },
             getPeers: () => manager.active,
             getRoles: () => discoverRoles(ctx.cwd),
-            getMaxRows: () => overlayDims(tui).maxHeight,
+            // Crop headroom: render 3 rows under the overlay budget so the
+            // bottom border always paints (verified by screenshot loop).
+            getMaxRows: () => overlayDims(tui).maxHeight - 3,
             onClose: () => done(undefined),
             onUnfocus: () => {
               sidecar?.handle?.unfocus?.();
@@ -190,6 +196,15 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   }
 
   // ------------------------------------------------------------- commands
+
+  // Alias: /peers toggles the panel too — "peers" names the crew.
+  pi.registerCommand("peers", {
+    description: "toggle the peers panel (alias of bare /peer)",
+    handler: async (_args: unknown, ctx: ExtensionContext) => {
+      track(ctx);
+      toggleSidecar(ctx);
+    },
+  });
 
   pi.registerCommand("peer", {
     description: "peers: (bare = toggle sidecar) | launch <role> <task> | stop <name|all> | retask <name> <task> | broadcast <text> | list",
