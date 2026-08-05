@@ -114,6 +114,7 @@ usage: pi-peer [--cwd <dir>] <command>
   launch <role> <task…> [--tick <min>] [--context fork|compacted|fresh] [--watch <dir>]
          [--until-file <path> | --until-exit0 '<cmd>'] [--max-cycles N]   # MISSION mode
   talk <name> <message…>                   send a message, print the peer's reply
+  talk-main <session-id> <message…>        message a MAIN session from outside (delivered into its live turn)
   retask <name> <task…> [--tick <min>]
   tick <name> <minutes>                    change a peer's interval
   model <name> <provider/model|substring>  switch a peer's model
@@ -132,7 +133,9 @@ async function main() {
       }
       for (const e of roster) {
         const u = e.usage ? ` ↑${e.usage.input} ↓${e.usage.output} $${e.usage.costUsd.toFixed(3)}` : "";
-        const m = e.mode === "mission" ? ` [mission ${e.cycles ?? 0}/${e.objective?.maxCycles ?? 20} until ${e.objective?.kind}:${e.objective?.value}]` : "";
+        const m = e.kind === "main"
+          ? " [MAIN SESSION]"
+          : e.mode === "mission" ? ` [mission ${e.cycles ?? 0}/${e.objective?.maxCycles ?? 20} until ${e.objective?.kind}:${e.objective?.value}]` : "";
         console.log(
           `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${String(e.status).padEnd(10)} tick ${String(Math.round((e.tickBaseS ?? 300) / 60) + "m").padEnd(5)}${u}${m} · ${e.task}`,
         );
@@ -154,8 +157,19 @@ async function main() {
         console.log("no agents on record — launch one with: pi-peer launch <role> <task…>");
         return;
       }
-      console.log(`AGENT CENSUS · ${roster.length} on record · project ${cwd}\n`);
-      for (const e of roster) {
+      const mains = roster.filter((e) => e.kind === "main");
+      const agents = roster.filter((e) => e.kind !== "main");
+      console.log(`AGENT CENSUS · ${mains.length} main session(s) + ${agents.length} agent(s) · project ${cwd}\n`);
+      for (const m of mains) {
+        const stale = m.lastSeenAt && Date.now() - Date.parse(m.lastSeenAt) > 60_000;
+        const state = m.status === "stopped" ? "stopped" : stale ? "no heartbeat (stale?)" : "running";
+        console.log(`${m.name}  [MAIN SESSION] · ${state}`);
+        console.log(`  address : ${m.address}`);
+        console.log(`  started : ${m.startedAt}${m.lastSeenAt ? ` · last seen ${m.lastSeenAt}` : ""}`);
+        console.log(`  talk    : pi-peer --cwd ${cwd} talk-main ${m.peerSessionId.slice(0, 8)} "…"`);
+        console.log(`  resume  : pi --session ${m.peerSessionFile}\n`);
+      }
+      for (const e of agents) {
         const mode = e.mode ?? "watch";
         const prog = mode === "mission"
           ? `cycles ${e.cycles ?? 0}/${e.objective?.maxCycles ?? 20} until ${e.objective?.kind}:${e.objective?.value}`
@@ -201,6 +215,21 @@ async function main() {
       if (!task) fail("launch needs a task");
       await run({ action: "launch", role, task, tickMinutes: tick ? Number(tick) : undefined, context, watchCwd: watch ? path.resolve(watch) : undefined,
         untilFile, untilExit0, maxCycles: maxCycles ? Number(maxCycles) : undefined });
+      return;
+    }
+    case "talk-main": {
+      // Reach a MAIN session from outside, addressed by its session id (or a
+      // unique prefix, as shown by `census`). Delivery is an injection into
+      // that session's live turn -- it answers there, in its own session, not
+      // here; so this returns as soon as the running session accepts it.
+      const target = argv.shift();
+      const message = argv.join(" ");
+      if (!target || !message) fail("usage: pi-peer talk-main <session-id-or-prefix> <message…>");
+      const mains = readRoster().filter((e) => e.kind === "main");
+      const hit = mains.find((m) => m.peerSessionId === target || m.peerSessionId.startsWith(target) || m.name === target);
+      if (!hit) fail(`no registered main session matching "${target}" — run: pi-peer --cwd ${cwd} census`);
+      if (hit.status === "stopped") console.error(`warning: ${hit.name} is marked stopped — queuing anyway, it will be picked up if that session returns`);
+      await run({ action: "talk", target: hit.peerSessionId, message }, { timeoutMs: 30_000, quietOk: true });
       return;
     }
     case "talk": {

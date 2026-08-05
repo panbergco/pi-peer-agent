@@ -111,6 +111,11 @@ export const DEFAULT_CONFIG: PeerConfig = {
 };
 
 export interface RosterEntry {
+  /** "peer" (default, omitted on existing entries for back-compat) or "main" --
+   *  a main session registering ITSELF so it is discoverable/reachable from
+   *  outside, not just its peers (operator finding 2026-08-05: "the main
+   *  agent also must register"). */
+  kind?: "peer" | "main";
   name: string;
   role: string;
   address: string;
@@ -123,6 +128,9 @@ export interface RosterEntry {
   tickBaseS: number;
   status: PeerStatus;
   startedAt: string;
+  /** kind === "main" only: last time this session touched its own entry
+   *  (heartbeat) -- lets an outside viewer tell running from stale. */
+  lastSeenAt?: string;
   /** Watch directory (E1): peer file tools rooted here when set. */
   watchCwd?: string;
   /** Agent mode (spec §16); absent = "watch" for pre-existing rosters. */

@@ -14,7 +14,7 @@ import { Type } from "typebox";
 import { discoverRoles, parseTick } from "../src/roles.js";
 import { PeerManager } from "../src/runtime.js";
 import { PeerSidecar } from "../src/sidecar.js";
-import { appendEvent, loadConfig, readRoster, resetEventSink, setEventSink, type PeerEvent } from "../src/state.js";
+import { appendEvent, loadConfig, markMainStopped, readRoster, registerMain, resetEventSink, setEventSink, touchMain, type PeerEvent } from "../src/state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -597,17 +597,26 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       const roles = discoverRoles(ctx.cwd)
         .map((r) => `- ${r.name} (${r.source}): ${r.description} [tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling}, ${r.context}]`)
         .join("\n");
-      // CENSUS (IP-06): every agent this surface launched — live, ended, or
-      // from a previous session — so nothing this project runs is hidden.
+      // CENSUS: every agent AND every main session this project knows about —
+      // live, ended, or from a previous run. A main is now as findable as its
+      // peers (operator finding 2026-08-05: the owner was invisible).
       const live = manager.all;
       const liveNames = new Set(live.map((p) => p.name));
+      const rosterAll = readRoster(ctx.cwd);
+      const mainLines = rosterAll
+        .filter((r) => r.kind === "main")
+        .map(
+          (m) =>
+            `- ${m.name} [MAIN] · ${m.status === "stopped" ? "stopped" : "running"} · last seen ${m.lastSeenAt ?? "?"} · ${m.address} · resume: pi --session ${m.peerSessionFile}`,
+        );
       const census = [
+        ...mainLines,
         ...live.map(
           (p) =>
             `- ${p.name} [${p.mode}] (${p.role.name}) · ${p.status} · ${p.mode === "mission" ? `cycles ${p.cycles}/${p.objective?.maxCycles ?? 20} until ${p.objective?.kind}:${p.objective?.value}` : `tick ${p.tickCount}`} · findings ${p.findings.length} · $${p.usage.costUsd.toFixed(3)} · task: ${p.task}`,
         ),
-        ...readRoster(ctx.cwd)
-          .filter((r) => !liveNames.has(r.name))
+        ...rosterAll
+          .filter((r) => r.kind !== "main" && !liveNames.has(r.name))
           .map(
             (r) =>
               `- ${r.name} [${r.mode ?? "watch"}] (${r.role}) · ${r.status} (from durable state) · task: ${r.task} · resume: pi --session ${r.peerSessionFile}`,
@@ -616,7 +625,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       return {
         content: [{
           type: "text" as const,
-          text: `ROLES:\n${roles || "(none)"}\n\nAGENT CENSUS — every agent launched through this surface (peer_roster with name for full detail):\n${census || "(none)"}`,
+          text: `ROLES:\n${roles || "(none)"}\n\nAGENT CENSUS — main sessions and every agent launched through this surface (peer_roster with name for full detail):\n${census || "(none)"}`,
         }], details: {},
       };
     },
@@ -752,6 +761,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   let inboxTimer: ReturnType<typeof setInterval> | null = null;
   let peerMode: any = null; // roster entry when this session IS a peer
+  let mainSessionId: string | null = null; // set once this session registers itself
 
   function inboxDir(cwd: string): string {
     return path.join(cwd, ".pi", "peer-agent", "inbox");
@@ -774,6 +784,15 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         return { ok: true, message: `${peer.name} launched (${peer.mode}${peer.objective ? ` until ${peer.objective.kind}:${peer.objective.value}` : ""}, tick ${Math.round(eff.tick / 60)}m) · resume: pi --session ${peer.sessionFile}` };
       }
       case "talk": {
+        // talk-to-MAIN (AC2): addressed by session id, not a peer callsign.
+        // Delivery is injection into the live turn -- like a peer's finding,
+        // not a blocking RPC, so there is no "reply" to return synchronously.
+        if (cmd.target) {
+          const content = `[main-agent] message from outside agent://pi/${cmd.target} (control, talk)\n\n${String(cmd.message)}`;
+          pi.sendMessage({ customType: "main-talk", content, display: true }, { deliverAs: "steer", triggerTurn: true });
+          appendEvent(ctx.cwd, "main.talk.delivered", { target: cmd.target, chars: String(cmd.message).length });
+          return { ok: true, message: `delivered into the live session's turn (target ${cmd.target}) -- it will respond in its own session, not here` };
+        }
         const res = await manager.talk(String(cmd.name), String(cmd.message), "operator");
         if (res.status !== "ok") return { ok: false, message: `${cmd.name}: ${res.status}` };
         return { ok: true, message: `${cmd.name} replied:`, reply: res.reply ?? "(empty)" };
@@ -844,6 +863,17 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               } catch {
                 /* malformed */
               }
+              // A control targeted at a DIFFERENT main session (talk-main,
+              // addressed by session id) is not mine to consume -- leave it
+              // for the right session's watcher rather than misdeliver or
+              // silently drop it (AC2). Everything else (peer commands, or a
+              // target that matches ME) is handled here as before.
+              if (cmd?.action === "talk" && cmd?.target && mainSessionId && cmd.target !== mainSessionId) {
+                const mains = readRoster(ctx.cwd).filter((e) => e.kind === "main");
+                const targetsAnotherMain = mains.some((m) => m.peerSessionId === cmd.target || m.peerSessionId.startsWith(cmd.target));
+                const targetsMe = mainSessionId === cmd.target || mainSessionId.startsWith(cmd.target);
+                if (targetsAnotherMain && !targetsMe) continue; // leave the file in place
+              }
               fs.renameSync(p, path.join(ctlProcessed, f));
               if (!cmd?.id) continue;
               void applyControl(lastCtx ?? ctx, cmd)
@@ -854,6 +884,15 @@ export default function piPeerAgent(pi: ExtensionAPI) {
                   appendControlAck(ctx.cwd, { id: cmd.id, action: cmd.action, ok: false, message: String(err).slice(0, 200) });
                 });
             }
+          }
+        }
+        // Heartbeat: prove this main session's registration is CURRENT, not a
+        // stale record left by a session that crashed without shutdown.
+        if (mainSessionId) {
+          try {
+            touchMain(ctx.cwd, mainSessionId);
+          } catch {
+            /* advisory */
           }
         }
       } catch {
@@ -883,6 +922,19 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       return;
     }
     startInboxWatcher(ctx);
+    // Register MYSELF (operator finding 2026-08-05: peers were discoverable,
+    // the main session that owns them was not). Best-effort, never fatal.
+    try {
+      const sid = (ctx as any)?.sessionManager?.getSessionId?.();
+      const sfile = (ctx as any)?.sessionManager?.getSessionFile?.();
+      if (sid) {
+        mainSessionId = sid;
+        registerMain(ctx.cwd, { id: sid, file: sfile ?? "", model: (ctx as any)?.model?.id });
+        appendEvent(ctx.cwd, "main.registered", { sessionId: sid });
+      }
+    } catch {
+      /* registration is advisory, never fatal */
+    }
     // Recover this session's suspended crew (restart/resume/reload) — peers
     // are part of the session and come back with it, memory intact.
     try {
@@ -911,5 +963,13 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     // Suspend, don't stop: the crew is part of the session and recovers
     // with it (roster.json keeps them as 'suspended').
     await manager.suspendAll();
+    if (mainSessionId && lastCtx) {
+      try {
+        markMainStopped(lastCtx.cwd, mainSessionId);
+        appendEvent(lastCtx.cwd, "main.stopped", { sessionId: mainSessionId });
+      } catch {
+        /* advisory */
+      }
+    }
   });
 }

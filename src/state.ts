@@ -80,6 +80,53 @@ export function readRoster(cwd: string): RosterEntry[] {
   }
 }
 
+/** Merge-write a SINGLE entry into the roster, preserving every entry owned by
+ *  another session (same discipline as the peer-manager's mergeRoster --
+ *  sprint 6 found that a blind overwrite makes concurrent sessions erase each
+ *  other's crew; the same class of bug applies here). Matched by name. */
+function upsertRosterEntry(cwd: string, entry: RosterEntry): void {
+  const rest = readRoster(cwd).filter((e) => e.name !== entry.name);
+  writeRoster(cwd, [...rest, entry]);
+}
+
+/** A main session registers ITSELF (operator finding 2026-08-05: peers were
+ *  discoverable, the main session that owns them was not). Keyed by session
+ *  id so it never collides with a peer callsign. */
+export function registerMain(cwd: string, session: { id: string; file: string; task?: string; model?: string }): void {
+  upsertRosterEntry(cwd, {
+    kind: "main",
+    name: `main-${session.id.slice(0, 8)}`,
+    role: "main",
+    address: `agent://pi/${session.id}`,
+    peerSessionId: session.id,
+    peerSessionFile: session.file,
+    parentSessionId: "",
+    task: session.task ?? "(main session)",
+    contextMode: "fork",
+    model: session.model ?? "unknown",
+    tickBaseS: 0,
+    status: "waiting",
+    startedAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+  });
+}
+
+/** Heartbeat: proves "running" is current, not a stale registration from a
+ *  session that crashed without a clean shutdown. */
+export function touchMain(cwd: string, sessionId: string): void {
+  const entries = readRoster(cwd);
+  const mine = entries.find((e) => e.kind === "main" && e.peerSessionId === sessionId);
+  if (!mine) return;
+  upsertRosterEntry(cwd, { ...mine, lastSeenAt: new Date().toISOString() });
+}
+
+export function markMainStopped(cwd: string, sessionId: string): void {
+  const entries = readRoster(cwd);
+  const mine = entries.find((e) => e.kind === "main" && e.peerSessionId === sessionId);
+  if (!mine) return;
+  upsertRosterEntry(cwd, { ...mine, status: "stopped", lastSeenAt: new Date().toISOString() });
+}
+
 export function loadConfig(): PeerConfig {
   try {
     const raw = readFileSync(join(homedir(), ".pi", "agent", "peer-agent.json"), "utf8");

@@ -94,10 +94,12 @@ Drive the crew from any terminal or script — no pi session in *that* shell nee
 (write commands are applied within ~5s by the live session; reads work always):
 
 ```bash
+pi-peer census                                # FULL picture: main sessions + every agent
 pi-peer list                                  # crew overview (reads roster.json)
 pi-peer findings [name]                       # delivered findings (reads the ledger)
 pi-peer launch observer "keep the record" --tick 5
 pi-peer talk observer-1 "what happened while I was away?"   # prints the reply
+pi-peer talk-main 019fd3b3 "stop and re-read the spec"      # message a MAIN session from outside
 pi-peer retask observer-1 "new focus" --tick 9
 pi-peer tick observer-1 7
 pi-peer model observer-1 glm-5-2
