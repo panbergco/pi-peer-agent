@@ -1,3 +1,10 @@
 node_modules/
 .scratch/
 dist/
+# project-ops state (local-only, never published)
+.pisg/
+pisg-docs/
+pisg-proof/
+.pi/
+.scratch/
+AGENTS.md
