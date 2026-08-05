@@ -109,6 +109,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             // bottom border always paints (verified by screenshot loop).
             getMaxRows: () => overlayDims(tui).maxHeight - 3,
             getModels: () => manager.listModels(),
+            onTick: (name: string, minutes: number) => {
+              if (manager.setTick(name, minutes * 60)) (lastCtx ?? ctx).ui?.notify?.(`${name}: tick → ${minutes}m`, "info");
+            },
             onClose: () => done(undefined),
             onUnfocus: () => {
               sidecar?.handle?.unfocus?.();
@@ -411,7 +414,30 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       if (params.name) {
         const p = manager.peers.get(params.name);
         if (!p || p.status === "stopped") {
-          return { content: [{ type: "text" as const, text: `No active peer named ${params.name}.` }], details: {} };
+          // Not active — serve history: roster identity + findings from the ledger.
+          const entry = readRoster(ctx.cwd).find((e) => e.name === params.name);
+          const ledgerPath = path.join(ctx.cwd, ".pi", "peer-agent", "events.jsonl");
+          const findings: string[] = [];
+          try {
+            const lines = fs.readFileSync(ledgerPath, "utf8").trim().split("\n").slice(-1000);
+            for (const line of lines) {
+              try {
+                const e = JSON.parse(line);
+                if ((e.kind === "finding.delivered" || e.kind === "inbox.delivered") && e.peer === params.name && e.body)
+                  findings.push(`  [${e.kind === "inbox.delivered" ? "standalone · " : ""}tick ${e.tick ?? "?"} · ${e.priority} · ${e.ts}]\n  ${e.body}`);
+              } catch { /* skip bad line */ }
+            }
+          } catch { /* no ledger */ }
+          const text = entry || findings.length
+            ? [
+                `${params.name} — NOT ACTIVE${entry ? ` (last status: ${entry.status})` : ""}`,
+                entry ? `was: ${entry.role} · task: ${entry.task}\nresume standalone: pi --session ${entry.peerSessionFile}` : "",
+                ``,
+                `LEDGER FINDINGS (${findings.length}):`,
+                findings.join("\n\n") || "  (none recorded with bodies)",
+              ].join("\n")
+            : `No peer named ${params.name} — active or historical.`;
+          return { content: [{ type: "text" as const, text }], details: {} };
         }
         const etaS = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
         const findings = p.findings.length
@@ -527,11 +553,13 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     parameters: Type.Object({
       name: Type.String({ description: "Peer callsign, e.g. sentinel-1" }),
       task: Type.String({ description: "The new or additional instruction." }),
+      tickMinutes: Type.Optional(Type.Number({ description: "Also change this peer's tick interval (minutes, min 1)." })),
     }),
     async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
       const ok = manager.retask(params.name, params.task);
-      return { content: [{ type: "text" as const, text: ok ? `${params.name} retasked.` : `No active peer named ${params.name}.` }], details: {} };
+      if (ok && params.tickMinutes) manager.setTick(params.name, Math.floor(params.tickMinutes * 60));
+      return { content: [{ type: "text" as const, text: ok ? `${params.name} retasked${params.tickMinutes ? ` (tick → ${params.tickMinutes}m)` : ""}.` : `No active peer named ${params.name}.` }], details: {} };
     },
   });
 

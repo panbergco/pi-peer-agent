@@ -57,6 +57,8 @@ export interface SidecarOptions {
   onModel: (name: string, query: string) => void;
   /** Models available in pi — for /model autocomplete. */
   getModels: () => string[];
+  /** Change the selected peer's tick interval (minutes). */
+  onTick: (name: string, minutes: number) => void;
   onRetask: (name: string, task: string) => void;
   insertText: (text: string) => void;
   yankText: (text: string, label: string) => void;
@@ -133,6 +135,7 @@ export class PeerSidecar extends Container implements Focusable {
         },
       },
       { name: "stop", description: "stop a peer (session retained)", argumentHint: "[name]", getArgumentCompletions: peerItems },
+      { name: "tick", description: "change the selected peer's tick interval", argumentHint: "<minutes>" },
       { name: "retask", description: "give the selected peer a new standing task", argumentHint: "<task…>" },
       { name: "insert", description: "insert the latest finding into the main prompt" },
       { name: "yank", description: "copy latest finding (or pane) to clipboard" },
@@ -205,14 +208,29 @@ export class PeerSidecar extends Container implements Focusable {
   private command(cmd: string): void {
     const [verb, ...rest] = cmd.split(/\s+/).filter(Boolean);
     const peer = this.selectedPeer();
+    // Muscle memory: "/peers launch x" typed in the panel routes to "/launch x".
+    if ((verb ?? "").toLowerCase() === "peers" || (verb ?? "").toLowerCase() === "peer") {
+      if (rest.length === 0) {
+        this.opts.onClose();
+        return;
+      }
+      this.command(rest.join(" "));
+      return;
+    }
     switch ((verb ?? "").toLowerCase()) {
       case "help":
-        this.setFlash("/launch [role task…] · /model [query] · /stop [name] · /retask <task…> · /insert · /yank · /resume · /close");
+        this.setFlash("/launch [role task…] · /model [query] · /tick <min> · /stop [name] · /retask <task…> · /insert · /yank · /resume · /close");
         return;
       case "model":
         if (peer) this.opts.onModel(peer.name, rest.join(" "));
         else this.setFlash("no peer selected — /launch first");
         return;
+      case "tick": {
+        const min = Number.parseInt(rest[0] ?? "", 10);
+        if (peer && Number.isFinite(min) && min >= 1) this.opts.onTick(peer.name, min);
+        else this.setFlash("usage: /tick <minutes>");
+        return;
+      }
       case "launch":
         if (rest.length >= 2) this.opts.onLaunchDirect(rest[0]!, rest.slice(1).join(" "));
         else this.opts.onLaunch();

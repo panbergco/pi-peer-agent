@@ -191,7 +191,10 @@ export class PeerManager {
   }
 
   private refreshRoster(cwd: string): void {
-    const entries: RosterEntry[] = this.active.map((p) => ({
+    // Roster reflects the WHOLE session crew, stopped included — a stopped
+    // peer's identity, task, and resume path stay discoverable (recovery
+    // ignores status 'stopped').
+    const entries: RosterEntry[] = [...this.peers.values()].map((p) => ({
       name: p.name,
       role: p.role.name,
       address: p.address,
@@ -577,19 +580,23 @@ export class PeerManager {
 
     try {
       await peer.session.prompt(parts.join("\n\n"));
-      let text = "";
-      const msgs: any[] = peer.session.state?.messages ?? [];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i]?.role === "assistant") {
-          text = textOfBlocks(msgs[i].content);
-          break;
-        }
+      let text = this.lastAssistantText(peer);
+      // One re-ask on a malformed verdict: the common failure is a model
+      // that did tool calls and forgot the closing line — a single nudge
+      // recovers it; a second failure degrades to QUIET as before.
+      if (!this.parseVerdict(text)) {
+        appendEvent(cwd, "peer.verdict-reask", { peer: peer.name, tick: peer.tickCount });
+        await peer.session.prompt("Your verdict line was missing. Reply NOW with only the verdict line: QUIET or FINDING[info|steering|interrupt]: <paragraph>.");
+        text = this.lastAssistantText(peer);
       }
       this.handleVerdict(peer, text, cwd);
     } catch (err) {
+      // API errors (429s, transient network) must not look like judgment:
+      // status error, note, and a HARDER backoff than a quiet tick.
       peer.status = "error";
+      peer.backoffIdx = this.config.backoff.length - 1;
       appendEvent(cwd, "peer.error", { peer: peer.name, tick: peer.tickCount, error: String(err).slice(0, 300) });
-      peer.pane.push({ kind: "note", text: `error: ${String(err).slice(0, 120)}` });
+      peer.pane.push({ kind: "note", text: `tick errored (will retry): ${String(err).slice(0, 100)}` });
     } finally {
       peer.busy = false;
       if ((peer.status as PeerStatus) !== "stopped") {
@@ -601,13 +608,25 @@ export class PeerManager {
     }
   }
 
+  private lastAssistantText(peer: Peer): string {
+    const msgs: any[] = peer.session.state?.messages ?? [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]?.role === "assistant") return textOfBlocks(msgs[i].content);
+    }
+    return "";
+  }
+
+  private parseVerdict(text: string): RegExpMatchArray | null {
+    const matches = [...text.matchAll(/^\s*(QUIET\s*$|FINDING\[(info|steering|interrupt)\]\s*:\s*([\s\S]*))/gim)];
+    return matches.length > 0 ? matches[matches.length - 1]! : null;
+  }
+
   private parentAddress(): string {
     return `agent://pi/${this.parentSessionId()}`;
   }
 
   private handleVerdict(peer: Peer, text: string, cwd: string): void {
-    const matches = [...text.matchAll(/^\s*(QUIET\s*$|FINDING\[(info|steering|interrupt)\]\s*:\s*([\s\S]*))/gim)];
-    const m = matches.length > 0 ? matches[matches.length - 1] : null;
+    const m = this.parseVerdict(text);
     if (!m) {
       peer.quietStreak++;
       appendEvent(cwd, "peer.malformed", { peer: peer.name, tick: peer.tickCount });
@@ -649,7 +668,7 @@ export class PeerManager {
         // info: appended at the next natural boundary; never wakes (D-08).
         this.pi.sendMessage({ customType: "peer-finding", content, display: true }, { deliverAs: "nextTurn" });
       }
-      appendEvent(cwd, "finding.delivered", { peer: peer.name, id: finding.id, priority: finding.priority, clamped: finding.clamped, tick: finding.tick });
+      appendEvent(cwd, "finding.delivered", { peer: peer.name, id: finding.id, priority: finding.priority, clamped: finding.clamped, tick: finding.tick, body: finding.body.slice(0, 2000) });
     } catch (err) {
       appendEvent(cwd, "finding.failed", { peer: peer.name, id: finding.id, error: String(err).slice(0, 200) });
     }
@@ -769,6 +788,22 @@ export class PeerManager {
     if (scoped.length > 0) return scoped.map((e: any) => `${e.model?.provider ?? e.provider}/${e.model?.id ?? e.id}`);
     const registry: any = (this.ctx as any)?.modelRegistry;
     return (registry?.getAll?.() ?? []).map((m: any) => `${m.provider}/${m.id}`);
+  }
+
+  /** Live tick-interval change for a running peer (seconds internally). */
+  setTick(name: string, seconds: number): boolean {
+    const peer = this.peers.get(name);
+    if (!peer || peer.status === "stopped") return false;
+    const tick = Math.max(60, Math.floor(seconds));
+    peer.role = { ...peer.role, tick };
+    peer.backoffIdx = 0;
+    this.scheduleTick(peer, 1000);
+    const cwd = this.ctx?.cwd ?? process.cwd();
+    appendEvent(cwd, "peer.tick-changed", { peer: name, tickS: tick });
+    peer.pane.push({ kind: "note", text: `tick → every ${Math.round(tick / 60)}m` });
+    this.refreshRoster(cwd);
+    this.notify();
+    return true;
   }
 
   retask(name: string, task: string): boolean {
