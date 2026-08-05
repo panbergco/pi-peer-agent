@@ -542,7 +542,14 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   pi.on("turn_start", (_e: unknown, ctx: ExtensionContext) => track(ctx));
   pi.on("turn_end", (_e: unknown, ctx: ExtensionContext) => track(ctx));
   pi.on("session_shutdown", async () => {
+    // Close the panel FIRST — a stale overlay surviving /reload would keep
+    // rendering from a dead manager ("no peer selected" beside live peers).
+    try {
+      sidecar?.close();
+    } catch {
+      /* already gone */
+    }
+    sidecar = null;
     await manager.stopAll();
-    sidecar?.close();
   });
 }

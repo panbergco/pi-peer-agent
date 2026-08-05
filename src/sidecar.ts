@@ -68,6 +68,7 @@ export class PeerSidecar extends Container implements Focusable {
   private follow = true;
   private viewportHeight = 8;
   private flash = "";
+  private flashAt = 0;
   private _focused = false;
 
   get focused(): boolean {
@@ -121,6 +122,7 @@ export class PeerSidecar extends Container implements Focusable {
 
   private setFlash(text: string): void {
     this.flash = text;
+    this.flashAt = Date.now();
     this.opts.requestRender();
   }
 
@@ -146,7 +148,7 @@ export class PeerSidecar extends Container implements Focusable {
     }
     const peer = this.selectedPeer();
     if (!peer) {
-      this.setFlash("no peer selected — /launch first");
+      this.setFlash(this.opts.getPeers().length === 0 ? "no peers yet — /launch <role> <task…> starts one" : "no peer selected — Tab to pick one");
       return;
     }
     this.follow = true;
@@ -434,6 +436,9 @@ export class PeerSidecar extends Container implements Focusable {
     const hiddenAbove = this.scrollOffset;
     const hiddenBelow = Math.max(0, maxScroll - this.scrollOffset);
     const scrollInfo = hiddenAbove || hiddenBelow ? ` · ↑${hiddenAbove} ↓${hiddenBelow}` : "";
+    // Flashes expire — a 5s-old warning must not outlive the situation it
+    // described (a stale 'no peer selected' next to a selected peer).
+    if (this.flash && Date.now() - this.flashAt > 5000) this.flash = "";
     const status = this.flash
       ? this.safeFg("warning", ` ${this.flash}`)
       : sel
