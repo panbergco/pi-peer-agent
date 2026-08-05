@@ -928,6 +928,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       return;
     }
     startInboxWatcher(ctx);
+    // Re-query the kitty keyboard protocol shortly after boot. Multiplexers
+    // (cmux, tmux variants) sometimes drop the query pi's TUI sends at
+    // startup while the surface is still attaching — leaving Ghostty unable
+    // to report Cmd/⌥ modifier chords at all (macOS cmd+alt+p then types
+    // "π" or nothing). Harmless when the protocol is already active: the
+    // terminal just re-answers with the same flags.
+    if (process.platform === "darwin") {
+      setTimeout(() => {
+        try {
+          process.stdout.write("\x1b[>7u\x1b[?u\x1b[c");
+        } catch {
+          /* never fatal */
+        }
+      }, 1500);
+    }
     // Register MYSELF (operator finding 2026-08-05: peers were discoverable,
     // the main session that owns them was not). Best-effort, never fatal.
     try {
