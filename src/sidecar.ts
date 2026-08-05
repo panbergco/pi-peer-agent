@@ -438,7 +438,7 @@ export class PeerSidecar extends Container implements Focusable {
 
     const hints = this._focused
       ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc → main prompt (panel stays) "
-      : " panel stays open · typing goes to the main prompt · /peer close · ctrl+alt+p focus panel ";
+      : " panel stays open · typing goes to the main prompt · /peers close · ctrl+alt+p focus panel ";
     lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
     lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
     return lines;

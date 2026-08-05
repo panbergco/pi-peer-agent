@@ -197,16 +197,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   // ------------------------------------------------------------- commands
 
-  // Alias: /peers toggles the panel too — "peers" names the crew.
   pi.registerCommand("peers", {
-    description: "toggle the peers panel (alias of bare /peer)",
-    handler: async (_args: unknown, ctx: ExtensionContext) => {
-      track(ctx);
-      toggleSidecar(ctx);
-    },
-  });
-
-  pi.registerCommand("peer", {
     description: "peers: (bare = toggle sidecar) | launch <role> <task> | stop <name|all> | retask <name> <task> | broadcast <text> | list",
     handler: async (args: unknown, ctx: ExtensionContext) => {
       track(ctx);
@@ -224,7 +215,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const lines = [
           `roles: ${roles.map((r) => `${r.name} (${r.source}, tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling})`).join(" · ") || "none found"}`,
           `active: ${manager.active.map((p) => `${p.name}[t${p.tickCount}${p.findings.length ? ` ◆${p.findings.length}` : ""}]`).join(" · ") || "none"}`,
-          `usage: /peer (toggle sidecar) · /peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peer talk <name> <text…> · /peer stop <name|all> · /peer retask <name> <task…> · /peer broadcast <text…>`,
+          `usage: /peers (toggle panel) · /peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peers talk <name> <text…> · /peers stop <name|all> · /peers retask <name> <task…> · /peers broadcast <text…>`,
         ];
         ui?.notify?.(lines.join("\n"), "info");
         return;
@@ -253,7 +244,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         }
         const role = roles.find((r) => r.name === rest[0]);
         if (!role) {
-          ui?.notify?.(`unknown role "${rest[0]}" — /peer list shows what exists`, "error");
+          ui?.notify?.(`unknown role "${rest[0]}" — /peers list shows what exists`, "error");
           return;
         }
         let task = taskWords.join(" ");
@@ -283,7 +274,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const name = rest[0] ?? "";
         const text = rest.slice(1).join(" ");
         if (!text) {
-          ui?.notify?.("usage: /peer talk <name> <message…>", "error");
+          ui?.notify?.("usage: /peers talk <name> <message…>", "error");
           return;
         }
         const res = await manager.talk(name, text, "operator");
@@ -307,7 +298,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         return;
       }
 
-      ui?.notify?.(`unknown verb "${verb}" — /peer list for usage`, "error");
+      ui?.notify?.(`unknown verb "${verb}" — /peers list for usage`, "error");
     },
   });
 

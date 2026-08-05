@@ -89,9 +89,9 @@ the main agent ends a watch.
 - \`peer_retask{name, task}\` · \`peer_broadcast{text}\` · \`peer_stop{name|all}\`
 - \`peer_panel{action: open|close, peer?}\` — surface the human-visible panel
 
-**Control surface — HUMAN (slash + panel):** \`/peer\` toggles the panel ·
-\`/peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]\` ·
-\`/peer talk <name> <text…>\` · \`/peer retask\` · \`/peer broadcast\` · \`/peer stop <name|all>\` · \`/peer list\` · panel: \`l\` launch, \`i\` insert finding, \`y/Y/r\` yank, \`x\` stop.
+**Control surface — HUMAN (slash + panel):** \`/peers\` toggles the panel ·
+\`/peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]\` ·
+\`/peers talk <name> <text…>\` · \`/peers retask\` · \`/peers broadcast\` · \`/peers stop <name|all>\` · \`/peers list\` · panel: \`l\` launch, \`i\` insert finding, \`y/Y/r\` yank, \`x\` stop.
 
 **Roles** come from \`peers/*.md\` (bundled: drift-sentinel, evidence-auditor, observer),
 \`~/.pi/agent/peers/\`, \`<project>/.pi/peers/\` — frontmatter (tick in minutes,
