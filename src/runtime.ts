@@ -702,17 +702,20 @@ export class PeerManager {
     const peer = this.peers.get(name);
     if (!peer || peer.status === "stopped") return { ok: false, message: `no active peer named ${name}` };
     const registry: any = (this.ctx as any)?.modelRegistry;
-    const all: any[] = registry?.getAll?.() ?? [];
+    // Match against the same list the picker shows (scoped when configured).
+    const names = this.listModels();
     const [prov, ...rest] = ref.split("/");
     let model: any = rest.length ? registry?.find?.(prov, rest.join("/")) : undefined;
     if (!model) {
       const q = ref.toLowerCase();
-      const matches = all.filter((m) => `${m.provider}/${m.id}`.toLowerCase().includes(q));
-      if (matches.length === 1) model = matches[0];
-      else if (matches.length > 1)
-        return { ok: false, message: `ambiguous "${ref}": ${matches.slice(0, 6).map((m) => `${m.provider}/${m.id}`).join(", ")}${matches.length > 6 ? "…" : ""}` };
+      const matches = names.filter((n) => n.toLowerCase().includes(q));
+      if (matches.length === 1) {
+        const [p, ...r] = matches[0]!.split("/");
+        model = registry?.find?.(p, r.join("/"));
+      } else if (matches.length > 1)
+        return { ok: false, message: `ambiguous "${ref}": ${matches.slice(0, 6).join(", ")}${matches.length > 6 ? "…" : ""}` };
     }
-    if (!model) return { ok: false, message: `no model matching "${ref}" in pi's registry` };
+    if (!model) return { ok: false, message: `no model matching "${ref}" among pi's available models` };
     try {
       await peer.session.setModel(model);
       const label = `${model.provider}/${model.id}`;
@@ -726,8 +729,12 @@ export class PeerManager {
     }
   }
 
-  /** Models available in pi (the session's own registry — the same list pi serves). */
+  /** Models exactly as pi offers them: the session's SCOPED list when
+   *  scoping is configured (same set as pi's /scoped-models and ctrl+p
+   *  cycle), otherwise the full registry. */
   listModels(): string[] {
+    const scoped: any[] = ((this.ctx as any)?.scopedModels ?? []) as any[];
+    if (scoped.length > 0) return scoped.map((e: any) => `${e.model?.provider ?? e.provider}/${e.model?.id ?? e.id}`);
     const registry: any = (this.ctx as any)?.modelRegistry;
     return (registry?.getAll?.() ?? []).map((m: any) => `${m.provider}/${m.id}`);
   }
