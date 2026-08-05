@@ -277,7 +277,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   // ------------------------------------------------------------- commands
 
-  // E3: hosts (e.g. an external orchestrator, or a proof producer) attach an
+  // E3: hosts (e.g. a larger automation system, or a proof producer) attach an
   // in-process consumer for every peer event. Fan-out only — the JSONL ledger
   // is always still written, so file and store can never disagree.
   (globalThis as any).piPeerAgent = {

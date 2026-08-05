@@ -27,7 +27,7 @@ not vibes-scheduled.
 
 ## 2. First principles
 
-- **P1 — The framework issues the tick.** A peer never self-schedules (orchestrator doctrine
+- **P1 — The framework issues the tick.** A peer never self-schedules (a standing design constraint, established
   parity). Cadence and backoff are policy derived from durable state, executed by the
   extension.
 - **P2 — Push, never pull.** Findings enter the main agent through pi's own trusted
@@ -44,7 +44,7 @@ not vibes-scheduled.
   itself; priorities are capped per role. The main agent's attention is the scarcest
   resource in the system.
 - **P7 — Provenance before action.** Write-intent events land in the ledger before the
-  peer starts (dispatch parity with the orchestrator). Every finding is attributable: which peer, which
+  peer starts. Every finding is attributable: which peer, which
   tick, which session file, which parent.
 - **P8 — One writer per workspace.** Peers observe and report; only the main agent
   mutates the repo. (Write-gate compatibility falls out of P4 for free.)
@@ -69,8 +69,8 @@ before this spec was written (session of 2026-08-05).
 | Global shortcut | `pi.registerShortcut("ctrl+alt+p", …)` | pi docs extensions.md §registerShortcut |
 | Panel fallback | `ctx.ui.setWidget(key, lines, {placement})` | pi docs + live use (footer/tps) |
 | Role file conventions | frontmatter `name/description/model/thinking/tools` + body | pi-subagents `frontmatter.ts` + README |
-| Awareness block | idempotent markered block in `AGENTS.md`, versioned | the orchestrator's managed-block pattern |
-| Tick policy discipline | cadence + consecutive-quiet backoff derived from durable state | the orchestrator `tick.ts` |
+| Awareness block | idempotent markered block in `AGENTS.md`, versioned | a common managed-block pattern |
+| Tick policy discipline | cadence + consecutive-quiet backoff derived from durable state | derived, not invented, from durable state |
 
 ## 4. Identity, binding, and awareness
 
@@ -102,7 +102,7 @@ standalone resume knows exactly whose peer it is (used by the inbox transport, �
 
 ### 4.3 Awareness — the AGENTS.md block and the roster
 
-Two layers, the orchestrator-style separation of static rules from live state:
+Two layers, separating static rules from live state:
 
 1. **`AGENTS.md` managed block** (markers `<!-- peer-agent:start -->` /
    `<!-- peer-agent:end -->`, versioned, idempotent, refreshed by the extension on
@@ -123,7 +123,7 @@ Two layers, the orchestrator-style separation of static rules from live state:
 - Each **peer** gets a standing preamble in its system prompt: its own address, its
   parent's address, the roster path, its objective, and the FINDING/QUIET protocol (§6.3).
 - A **resumed peer** re-derives all of this from its session's binding entry — no
-  environment variables required (the orchestrator serviceless parity: durable state over process
+  environment variables required (durable state over process
   state).
 
 ## 5. Roles — `.md` files
@@ -150,20 +150,18 @@ You watch the main agent's recent work for scope creep…
 
 `interrupt` ceiling is reserved for roles whose misses are catastrophic (e.g. a
 secrets-leak watcher); v1 ships none by default. Two starter roles ship bundled:
-`drift-sentinel` (mission/scope drift) and `evidence-auditor` (claims without proof —
-the orchestrator-verifier-adjacent). the orchestrator integration adds roles that complement `decider`/`verifier`
-rather than duplicating them (§12).
+`drift-sentinel` (mission/scope drift) and `evidence-auditor` (claims without proof).
 
 ## 6. Tick engine
 
 ### 6.1 Cadence and backoff
 
 - Base cadence per role (`tick:` frontmatter, seconds; floor 3s).
-- Consecutive QUIET ticks escalate the interval: ×1 → ×2 → ×4 → ×8 (cap), the orchestrator
+- Consecutive QUIET ticks escalate the interval: ×1 → ×2 → ×4 → ×8 (cap), a
   ladder discipline. Any FINDING, any parent activity delta, or a retask resets to ×1.
 - Ticks are staggered across peers (phase offset) so N peers never fire inference
   simultaneously.
-- Soft cap: 6 concurrent peers (config `maxPeers`); warn-and-allow beyond, the orchestrator-style
+- Soft cap: 6 concurrent peers (config `maxPeers`); warn-and-allow beyond,
   conscious override.
 
 ### 6.2 The tick directive
@@ -279,7 +277,7 @@ tick?, ts}`; delivery above the seam is identical.
    delivers per §7. At-least-once with I5 dedupe.
 3. **v2 MACP center** — the real `macp/center` (implemented, tested, plain MCP server):
    register main + peers, `macp_send` for all three tiers, cross-harness roster. A
-   transport swap only; adopted when peer-agent meets the orchestrator's fleet phase.
+   transport swap only; adopted when the need for cross-harness routing arises.
 
 ## 10. CLI — `pi-peer` (pi-native contract surface; no MCP)
 
@@ -297,81 +295,41 @@ pi-peer init                # write/refresh the AGENTS.md block + .pi/peer-agent
 
 Model-facing surface (inside the session): `pi.registerTool("peer_launch" | "peer_stop"
 | "peer_retask" | "peer_roster" | "peer_broadcast")` so the MAIN AGENT can manage its
-peers as tool calls (e.g. the orchestrator tick directive: "launch an evidence-auditor for this
+peers as tool calls (e.g. a scheduling directive: "launch an evidence-auditor for this
 sprint"), plus `/peer launch|stop|retask` and `/peers` for the human.
 
 ## 11. Ledger
 
-`<project>/.pi/peer-agent/events.jsonl`, append-only, the orchestrator event discipline
+`<project>/.pi/peer-agent/events.jsonl`, append-only event log, mirroring common event-sourcing discipline
 (monotonic seq, ts, kind, payload). Kinds: `peer.spawned` (write-intent, §4.2),
 `tick.issued`, `tick.skipped`, `finding.delivered` (envelope id, priority, clamped?),
 `finding.info` (sidecar-only), `peer.malformed`, `peer.retasked`, `peer.stopped`,
 `inbox.received`, `inbox.duplicate`. The peer's pi session file is the transcript;
 the ledger is the coordination record — the pair reconstructs any incident.
 
-## 12. Orchestrator integration plan (prepared, not premature)
+## 12. Embedding in a larger system (prepared, not premature)
 
-_"The orchestrator" below is a private sprint-orchestration framework the author
-operates; its name and internals are withheld from this public document._
+peer-agent is designed to be embeddable: a resident crew that a larger dispatch or
+automation system can drive without knowing peer-agent's internals, and without
+peer-agent knowing anything about that system. No external system's name, design, or
+mechanics are documented here.
 
-- **Placement:** this package becomes a workspace package in the orchestrator's
-  monorepo; the extension registers alongside its own; the CLI folds into its verb set.
-- **Roles complement, not duplicate:** The orchestrator's `decider`/`verifier` are *dispatch* roles
-  (spawn, answer, exit). Peer roles are *resident watch* roles. An evidence-auditor
-  peer watching AC claims continuously is the standing counterpart of the verifier's
-  final judgment — same philosophy (default-REJECT, read-only), different lifecycle.
-- **Tick alignment:** peer ticks are seconds-scale and independent of the orchestrator's loop tick; both derive policy from durable state, never self-scheduled. An orchestrator tick directive may instruct the main agent to launch/retask peers via `peer_launch`.
-- **AGENTS.md coexistence:** the peer-agent block sits beside the orchestrator's block, own
-  markers, own version — the two managers never touch each other's spans.
-- **Gate compatibility:** peers hold no write tools (P4/P8), so the orchestrator's write gates
-  never see a peer; findings that demand repo changes are pushed to the main agent,
-  who acts under the gate wall as the sole writer.
-- **Vocabulary:** on integration, role names and event kinds register in its
-  vocabulary registry so the lingo wall owns them.
+- **Peers stay read-only.** Any host system remains the sole writer; a peer's
+  findings are recommendations, never edits.
+- **Standard extension surface.** A host registers alongside peer-agent's own
+  extension; nothing about peer-agent requires bespoke integration code.
+- **Pluggable event sink** (§7, E3): a host can receive every peer event in-process
+  (`setEventSink`) without peer-agent depending on how or where that host stores them.
+- **Structured finding references** (E4): a finding may cite the files it concerns,
+  giving any consumer a mechanical target — independent of what that consumer does
+  with it.
+- **Per-peer working directory** (E1) and **per-peer usage accounting** (E2): a peer
+  can watch a directory other than the project root and reports its own token/cost
+  usage — both useful to any host that runs multiple concurrent workers, without
+  assuming anything about how that host schedules them.
 
-### 12.1 Integration findings — live orchestrator observation (2026-08-05)
-
-Read-only inspection of the orchestrator's live session (mid fleet-phase: budget-driven
-dispatch, unified assignment scheduling, an author-never-fixes review rule,
-worktree-per-executor isolation, a fleet board and a concurrency exit drill queued) surfaced concrete integration surfaces — and four pre-integration
-enhancements to peer-agent itself:
-
-**Where peers slot into the orchestrator's machinery:**
-
-1. **Fleet observability (its fleet phase's missing layer).** Phase 3 runs ≥3 concurrent
-   executors in isolated worktrees under one conductor. Peers are the natural
-   per-executor watchdogs: a fleet-sentinel bound to each executor's WORKTREE pushes
-   stall/drift/conflict-risk findings to the conductor's session; the fleet board
-   renders the peer crew beside executors/claims/budgets.
-2. **Findings ↦ review feedback (the author-never-fixes rule).** It enforces "feedback author never fixes" in the scheduler. A peer finding that demands a repo change
-   should register as review feedback authored by the peer — gaining mechanical
-   resolution tracking AND the two-hop wall for free (a peer can never be assigned
-   anyway; its findings then carry scheduler weight, not just advisory weight).
-3. **Budget integration (its budget doctrine).** Dispatch is budget-bounded by expected
-   value; watchers cost tokens too. Peer per-tick usage feeds the same budget
-   accounting so the conductor's spend picture includes its standing watch.
-4. **Judgment tier support.** Sprints face a judge at archive. An evidence-auditor
-   peer watching the proof bundle AS IT FORMS flags evidence gaps before the
-   judgment tier does — standing counterpart to the judge's final verdict.
-5. **Decision desk .** Steering findings that contradict a standing ruling should file decision requests to the decider (auto mode) instead of
-   interrupting the operator — peers become a decider input channel.
-6. **Server-first residence .** The orchestrator converges on a headless loop with attach-viewports. Peer-agent's session-decoupled transports (control files, inbox,
-   roster/ledger reads) already match this shape; the peers panel is an attach-style
-   viewport. Its attach verb should be able to surface the crew.
-7. **Event store.** The orchestrator's events live in queryable SQLite; peer-agent's JSONL ledger
-   should write through a pluggable sink so integrated deployments land peer events
-   in that store under registered vocabulary.
-
-**Pre-integration enhancements to peer-agent (do these here, before the move):**
-
-- **E1 — per-peer cwd**: launch a peer bound to a directory other than the project
-  root (an executor's worktree). Unlocks finding 1; small (launch param + tool pass-through).
-- **E2 — per-peer usage accounting**: tokens/cost from the peer's AgentSession into
-  roster + ledger (`peer.usage` events). Unlocks finding 3; independently valuable.
-- **E3 — event-sink seam**: `appendEvent` behind an interface (JSONL default) so the
-  the orchestrator store becomes a drop-in sink. Unlocks finding 7.
-- **E4 — structured finding refs**: optional `files:[]` on FINDING verdicts so
-  review-feedback registration (finding 2) has mechanical targets.
+The pre-integration enhancements above (E1–E4) are complete and shipped; each stands
+on its own regardless of what, if anything, is ever integrated with.
 
 ## 13. Phasing
 
@@ -384,7 +342,7 @@ enhancements to peer-agent itself:
   `peer_*` tools, starter roles ship.
 - **P2 — detachment:** file-inbox transport (resumed peers keep reporting), `pi-peer`
   CLI complete.
-- **P3 — the orchestrator + center:** monorepo move, orchestrator peer verbs, vocabulary registration, MACP
+- **P3 — embedding + center:** monorepo move, host-side peer verbs, vocabulary registration, MACP
   center transport behind the seam.
 
 ## 14. Decision ledger
@@ -394,7 +352,7 @@ enhancements to peer-agent itself:
 | D-01 | In-process peers (SDK sessions), not child processes | resolved | seconds-tick residency; live streaming; one process; the tmux/process shape was explicitly rejected |
 | D-02 | Peers are file-backed named pi sessions | resolved | operator benchmark: individually resumable standalone |
 | D-03 | Fork context = `SessionManager.forkFrom` | resolved | native lineage in the transcript beats message-seeding |
-| D-04 | Read-only tools for peers, always | resolved | P4/P8; the orchestrator gate compatibility for free |
+| D-04 | Read-only tools for peers, always | resolved | P4/P8; write-gate compatibility for free |
 | D-05 | MACP envelope + addressing from day one, center deferred | resolved | protocol fidelity is cheap now, retrofit is expensive later |
 | D-06 | `Ctrl+Alt+P` default toggle | resolved | Alt+P taken in operator's environment; configurable regardless |
 | D-07 | Verdict-line protocol (QUIET/FINDING) over structured output | resolved (v1) | robust to small models; malformed ⇒ QUIET + ledger, never noise; revisit if clamp/malformed rates are high |
@@ -407,7 +365,7 @@ enhancements to peer-agent itself:
 - Peer-to-peer direct threads (beyond broadcast) — waits for a concrete need.
 - Persistent peer memory across main-session restarts (re-attach to an old peer
   session rather than spawning fresh) — likely `pi-peer attach`, post-P2.
-- Interrupt-priority roles and their authorization ceremony (MACP §9 grants; the orchestrator
+- Interrupt-priority roles and their authorization ceremony (MACP §9 grants; host-side
   operator-directive pattern is the likely shape).
 - Cost telemetry per peer (tokens/tick) surfaced in `pi-peer status` — P1 stretch.
 
