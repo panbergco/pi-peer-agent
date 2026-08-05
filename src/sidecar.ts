@@ -17,6 +17,7 @@
  */
 
 import {
+  CombinedAutocompleteProvider,
   Container,
   Editor,
   Key,
@@ -24,6 +25,7 @@ import {
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
+  type AutocompleteItem,
   type EditorTheme,
   type Focusable,
   type TUI,
@@ -53,6 +55,8 @@ export interface SidecarOptions {
   onTalk: (name: string, text: string) => void;
   /** /model [query] — change the selected peer's model (picker when ambiguous). */
   onModel: (name: string, query: string) => void;
+  /** Models available in pi — for /model autocomplete. */
+  getModels: () => string[];
   onRetask: (name: string, task: string) => void;
   insertText: (text: string) => void;
   yankText: (text: string, label: string) => void;
@@ -94,6 +98,49 @@ export class PeerSidecar extends Container implements Focusable {
     } as EditorTheme;
     this.input = new Editor(opts.tui, editorTheme, { paddingX: 0 });
     (this.input as any).onSubmit = (value: string) => this.submit(value);
+    // Slash-command autocomplete — pi's own mechanism (CombinedAutocompleteProvider),
+    // with per-argument completions: roles for /launch, models for /model,
+    // peer callsigns for /stop and /retask.
+    const peerItems = (prefix: string): AutocompleteItem[] =>
+      this.opts
+        .getPeers()
+        .filter((p) => p.name.startsWith(prefix))
+        .map((p) => ({ value: p.name, label: p.name, description: `${p.role.name} · ${p.status}` }));
+    const commands = [
+      {
+        name: "launch",
+        description: "launch a peer (bare = interactive picker)",
+        argumentHint: "[role] [task…]",
+        getArgumentCompletions: (prefix: string) =>
+          prefix.includes(" ")
+            ? null
+            : this.opts
+                .getRoles()
+                .filter((r) => r.name.startsWith(prefix))
+                .map((r) => ({ value: r.name, label: r.name, description: `${r.description} · tick ${Math.round(r.tick / 60)}m` })),
+      },
+      {
+        name: "model",
+        description: "change the selected peer's model (mirrors pi's registry)",
+        argumentHint: "[provider/model]",
+        getArgumentCompletions: (prefix: string) => {
+          const q = prefix.toLowerCase();
+          return this.opts
+            .getModels()
+            .filter((m) => m.toLowerCase().includes(q))
+            .slice(0, 15)
+            .map((m) => ({ value: m, label: m }));
+        },
+      },
+      { name: "stop", description: "stop a peer (session retained)", argumentHint: "[name]", getArgumentCompletions: peerItems },
+      { name: "retask", description: "give the selected peer a new standing task", argumentHint: "<task…>" },
+      { name: "insert", description: "insert the latest finding into the main prompt" },
+      { name: "yank", description: "copy latest finding (or pane) to clipboard" },
+      { name: "resume", description: "copy the standalone resume command" },
+      { name: "close", description: "close the panel" },
+      { name: "help", description: "list panel commands" },
+    ];
+    this.input.setAutocompleteProvider(new CombinedAutocompleteProvider(commands as any, process.cwd()));
     // SGR mouse reporting so wheel events reach handleInput (btw-proven).
     (opts.tui as any).terminal?.write?.("\x1b[?1000h\x1b[?1006h");
   }
@@ -246,31 +293,35 @@ export class PeerSidecar extends Container implements Focusable {
       this.scrollBy(wheel);
       return;
     }
-    if (matchesKey(data, Key.pageUp)) {
-      this.scrollBy(-(Math.max(1, this.viewportHeight - 1)));
-      return;
-    }
-    if (matchesKey(data, Key.pageDown)) {
-      this.scrollBy(Math.max(1, this.viewportHeight - 1));
-      return;
-    }
-    if (matchesKey(data, Key.up)) {
-      this.scrollBy(-1);
-      return;
-    }
-    if (matchesKey(data, Key.down)) {
-      this.scrollBy(1);
-      return;
-    }
-    if (matchesKey(data, Key.tab)) {
-      const n = this.opts.getPeers().length;
-      if (n > 0) {
-        this.selected = (this.selected + 1) % n;
-        this.follow = true;
-        this.scrollOffset = 0;
-        this.opts.requestRender();
+    // While the autocomplete list is open, ↑↓/Tab/Enter belong to it.
+    const acOpen = Boolean((this.input as any).autocompleteState);
+    if (!acOpen) {
+      if (matchesKey(data, Key.pageUp)) {
+        this.scrollBy(-(Math.max(1, this.viewportHeight - 1)));
+        return;
       }
-      return;
+      if (matchesKey(data, Key.pageDown)) {
+        this.scrollBy(Math.max(1, this.viewportHeight - 1));
+        return;
+      }
+      if (matchesKey(data, Key.up)) {
+        this.scrollBy(-1);
+        return;
+      }
+      if (matchesKey(data, Key.down)) {
+        this.scrollBy(1);
+        return;
+      }
+      if (matchesKey(data, Key.tab)) {
+        const n = this.opts.getPeers().length;
+        if (n > 0) {
+          this.selected = (this.selected + 1) % n;
+          this.follow = true;
+          this.scrollOffset = 0;
+          this.opts.requestRender();
+        }
+        return;
+      }
     }
     if (matchesKey(data, Key.escape)) {
       // Esc clears a draft first; on an empty input it CLOSES the panel

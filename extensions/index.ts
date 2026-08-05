@@ -106,6 +106,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             // Crop headroom: render 3 rows under the overlay budget so the
             // bottom border always paints (verified by screenshot loop).
             getMaxRows: () => overlayDims(tui).maxHeight - 3,
+            getModels: () => manager.listModels(),
             onClose: () => done(undefined),
             onUnfocus: () => {
               sidecar?.handle?.unfocus?.();
