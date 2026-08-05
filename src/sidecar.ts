@@ -38,6 +38,12 @@ function fmtTok(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n);
 }
 
+/** Human-readable shortcut labels, platform-correct: cmd+alt on macOS
+ *  (super = ⌘), ctrl+alt elsewhere — mirrors defaultChord() in types.ts. */
+const IS_DARWIN = process.platform === "darwin";
+const TOGGLE_LABEL = IS_DARWIN ? "cmd+alt+p" : "ctrl+alt+p";
+const FOCUS_LABEL = IS_DARWIN ? "cmd+alt+l" : "ctrl+alt+l";
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 type Theme = { fg(role: string, text: string): string; bold?(text: string): string };
@@ -308,16 +314,30 @@ export class PeerSidecar extends Container implements Focusable {
     this.opts.requestRender();
   }
 
-  /** ctrl+alt+p in legacy (ESC+ctrl-p) or CSI-u encoding. The focused
-   *  panel's editor would otherwise swallow the chord, making the global
-   *  shortcut unable to close what it opened (btw guards identically). */
+  /** The toggle chord in legacy (ESC+ctrl-p) or CSI-u encoding, PLUS the
+   *  macOS cmd+alt variant (modifier bits super|alt = 10, +1 for the
+   *  1-indexed CSI-u field). The focused panel's editor would otherwise
+   *  swallow the chord, making the global shortcut unable to close what it
+   *  opened (btw guards identically). Accepting both chord families on every
+   *  platform is harmless — non-darwin terminals never emit the super bit.
+   *  Lowercase + uppercase codepoints cover terminals that report the shifted
+   *  glyph without the shift bit in the modifier field. */
   private isToggleChord(data: string): boolean {
-    return data === "\x1b\x10" || data === "\x1b[112;7u" || data === "\x1b[80;7u";
+    return (
+      data === "\x1b\x10" || // alt+ctrl+p (legacy)
+      data === "\x1b[112;7u" || data === "\x1b[80;7u" || // ctrl+alt+p / P (CSI-u)
+      data === "\x1b[112;11u" || data === "\x1b[80;11u" // super+alt+p / P (macOS)
+    );
   }
 
-  /** ctrl+alt+l — focus toggle chord (legacy ESC+ctrl-l and CSI-u). */
+  /** ctrl+alt+l — focus toggle chord (legacy ESC+ctrl-l and CSI-u); same
+   *  super+alt variant added for macOS. */
   private isFocusChord(data: string): boolean {
-    return data === "\x1b\x0c" || data === "\x1b[108;7u" || data === "\x1b[76;7u";
+    return (
+      data === "\x1b\x0c" || // alt+ctrl+l (legacy)
+      data === "\x1b[108;7u" || data === "\x1b[76;7u" || // ctrl+alt+l / L (CSI-u)
+      data === "\x1b[108;11u" || data === "\x1b[76;11u" // super+alt+l / L (macOS)
+    );
   }
 
   handleInput(data: string): void {
@@ -362,7 +382,7 @@ export class PeerSidecar extends Container implements Focusable {
     }
     if (matchesKey(data, Key.escape)) {
       // Esc clears a draft first; on an empty input it CLOSES the panel
-      // (operator ruling). Handing keys to main without closing is ctrl+alt+l.
+      // (operator ruling). Handing keys to main without closing is the focus key.
       if (this.input.getText().length > 0) {
         this.input.setText("");
         this.opts.requestRender();
@@ -520,7 +540,7 @@ export class PeerSidecar extends Container implements Focusable {
     // Unfocused, the input area is one dim hint line.
     const inputLines = this._focused
       ? this.inputFrameLines(dialogWidth)
-      : [this.frameLine(this.safeFg("dim", " ⌨ ctrl+alt+p to type to peers — your typing goes to the MAIN prompt"), inner)];
+      : [this.frameLine(this.safeFg("dim", ` ⌨ ${TOGGLE_LABEL} to type to peers — your typing goes to the MAIN prompt`), inner)];
     const listChrome = listLines.length > 0 ? listLines.length + 1 : 0; // list + its rule (skipped entirely at 0 peers)
     const statusLines = 1;
     const chrome = 1 + listChrome + statusLines + 1 + inputLines.length + 1 + 1; // title, list+rule, status, rule, input, hints, bottom
@@ -568,8 +588,8 @@ export class PeerSidecar extends Container implements Focusable {
     lines.push(...inputLines);
 
     const hints = this._focused
-      ? " type = talk · /yank copies · Tab switch · ↑↓/PgUp/PgDn scroll · esc close · ctrl+alt+l → main "
-      : " typing goes to the MAIN prompt · ctrl+alt+l focus panel · ctrl+alt+p hide ";
+      ? ` type = talk · /yank copies · Tab switch · ↑↓/PgUp/PgDn scroll · esc close · ${FOCUS_LABEL} → main `
+      : ` typing goes to the MAIN prompt · ${FOCUS_LABEL} focus panel · ${TOGGLE_LABEL} hide `;
     lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
     lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
     return lines;

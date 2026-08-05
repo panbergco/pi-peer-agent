@@ -42,7 +42,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     void openSidecar(ctx, { focus });
   }
 
-  /** ctrl+alt+p = SHOW/HIDE toggle (final operator ruling). Opening always
+  /** toggleKey = SHOW/HIDE toggle (final operator ruling; default cmd+alt+p
+   *  on macOS, ctrl+alt+p elsewhere). Opening always
    *  focuses; Esc hands keys back to the main prompt; /peers is the backup
    *  open/close. */
   function shortcutToggle(ctx: ExtensionContext): void {
@@ -251,7 +252,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
           // nonCapturing: showing the panel must NOT steal focus from the main
           // prompt. Focus-stealing changes the main layout (footer/hints), and
           // pi then reflows the WHOLE transcript -- in a long session that
-          // reflow reads as "it reloaded/scrolled". Ctrl+Alt+L grants focus
+          // reflow reads as "it reloaded/scrolled". The focus key (default
+          // cmd+alt+l on macOS, ctrl+alt+l elsewhere) grants focus
           // deliberately; that is when a layout change is expected and wanted.
           overlayOptions: () => ({ ...overlayDims(overlayTui), nonCapturing: !opts?.focus }),
           onHandle: (handle: any) => {

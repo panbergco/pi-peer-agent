@@ -99,9 +99,17 @@ export interface PeerConfig {
   deltaCapChars: number;
 }
 
+/** Default shortcut chords, platform-correct: macOS keyboards carry ⌘/⌥ so
+ *  cmd+alt is the natural chord (pi-tui's `super` bit); elsewhere Ctrl+Alt is
+ *  the standard. Users can still override both via ~/.pi/agent/peer-agent.json
+ *  (loadConfig merges over these defaults). */
+function defaultChord(key: string): string {
+  return process.platform === "darwin" ? `super+alt+${key}` : `ctrl+alt+${key}`;
+}
+
 export const DEFAULT_CONFIG: PeerConfig = {
-  toggleKey: "ctrl+alt+p",
-  focusKey: "ctrl+alt+l",
+  toggleKey: defaultChord("p"),
+  focusKey: defaultChord("l"),
   maxPeers: 6,
   overlayWidthRatio: 0.7,
   overlayHeightRatio: 0.7,

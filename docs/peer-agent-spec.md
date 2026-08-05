@@ -214,7 +214,7 @@ center transport (§9.3) changes nothing above the transport seam.
 
 ## 8. Sidecar UI
 
-- Toggle: `Ctrl+Alt+P` (configurable — `~/.pi/agent/peer-agent.json` `toggleKey`) or
+- Toggle: `Cmd+Alt+P` on macOS, `Ctrl+Alt+P` elsewhere (configurable — `~/.pi/agent/peer-agent.json` `toggleKey`) or
   `/peers`. Peers run regardless of visibility.
 - Surface: `ctx.ui.custom(…, {overlay: true})`, anchor `right-center`, `width: "30%"`,
   `maxHeight: "90%"`, `nonCapturing` while unfocused; `visible` callback hides below

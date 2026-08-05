@@ -138,8 +138,8 @@ memory — ask it what happened, when, and why; info-only, never interrupts, 5m)
 
 | Key | Default | Meaning |
 |---|---|---|
-| `toggleKey` | `ctrl+alt+p` | panel show/hide |
-| `focusKey` | `ctrl+alt+l` | keyboard panel ⇄ main prompt |
+| `toggleKey` | `cmd+alt+p` (macOS) / `ctrl+alt+p` | panel show/hide |
+| `focusKey` | `cmd+alt+l` (macOS) / `ctrl+alt+l` | keyboard panel ⇄ main prompt |
 | `overlayWidthRatio` / `overlayHeightRatio` | `0.7` | panel size vs terminal |
 | `providerExtensions` | `["pi-devin-auth", "pi-anthropic-oauth"]` | auth/provider extensions loaded into peer sessions |
 | `deltaCapChars`, `backoff` | `6000`, `[1,2,4,8]` | tick delta cap, quiet-backoff ladder |
