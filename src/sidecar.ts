@@ -6,7 +6,7 @@
  *    geometric stability — btw's trick);
  *  - FIXED dialog height (padded viewport) so the panel never shifts with
  *    background or content;
- *  - follow-tail transcript with maxScroll clamping; wheel + Up/Down/PgUp/PgDn
+ *  - follow-tail transcript with maxScroll clamping; Up/Down/PgUp/PgDn
  *    scroll; Tab cycles peers;
  *  - /commands inside the input (/launch, /stop, /close, /insert, /yank,
  *    /resume, /retask, /help) — no single-letter hotkeys stealing typed text.
@@ -91,12 +91,8 @@ export class PeerSidecar extends Container implements Focusable {
   }
 
   set focused(value: boolean) {
-    const changed = this._focused !== value;
     this._focused = value;
     (this.input as any).focused = value;
-    // Grab the mouse only while we hold the keyboard: an unfocused panel must
-    // leave the terminal's own selection/copy alone.
-    if (changed) this.setMouseCapture(value);
   }
 
   constructor(private opts: SidecarOptions) {
@@ -163,14 +159,10 @@ export class PeerSidecar extends Container implements Focusable {
     // operator cannot select/copy text with the mouse at all.
   }
 
-  /** SGR mouse reporting: on while focused (wheel scrolling), off otherwise so
-   *  normal terminal selection/copy works (operator report 2026-08-05). */
-  private setMouseCapture(on: boolean): void {
-    (this.opts.tui as any).terminal?.write?.(on ? "\x1b[?1000h\x1b[?1006h" : "\x1b[?1000l\x1b[?1006l");
-  }
-
   dispose(): void {
-    this.setMouseCapture(false);
+    // Belt and braces: if anything ever left mouse reporting on, clear it, so
+    // the terminal's own selection can never be left broken by this panel.
+    (this.opts.tui as any).terminal?.write?.("\x1b[?1000l\x1b[?1006l");
   }
 
   // ---------------------------------------------------------------- helpers
@@ -299,6 +291,9 @@ export class PeerSidecar extends Container implements Focusable {
     }
   }
 
+  /** Unused: the panel deliberately does NOT capture the mouse (see dispose).
+   *  Kept private and uncalled so the wheel-decoding logic is available if a
+   *  future opt-in setting ever wants it. */
   private mouseDelta(data: string): number | null {
     const m = data.match(/^\x1b\[<(\d+);\d+;\d+[Mm]$/);
     if (!m) return null;
@@ -333,11 +328,6 @@ export class PeerSidecar extends Container implements Focusable {
     if (this.isFocusChord(data)) {
       // Panel receives input only when focused → hand keys back to main.
       this.opts.onUnfocus();
-      return;
-    }
-    const wheel = this.mouseDelta(data);
-    if (wheel !== null) {
-      this.scrollBy(wheel);
       return;
     }
     // While the autocomplete list is open, ↑↓/Tab/Enter belong to it.
@@ -578,8 +568,8 @@ export class PeerSidecar extends Container implements Focusable {
     lines.push(...inputLines);
 
     const hints = this._focused
-      ? " type = talk · /yank copies · Tab switch · ↑↓/wheel scroll · esc close · ctrl+alt+l → main (mouse-select works there) "
-      : " typing goes to the MAIN prompt · mouse selection/copy works here · ctrl+alt+l focus panel · ctrl+alt+p hide ";
+      ? " type = talk · /yank copies · Tab switch · ↑↓/PgUp/PgDn scroll · esc close · ctrl+alt+l → main "
+      : " typing goes to the MAIN prompt · ctrl+alt+l focus panel · ctrl+alt+p hide ";
     lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
     lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
     return lines;
