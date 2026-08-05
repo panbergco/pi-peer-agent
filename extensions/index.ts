@@ -9,7 +9,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { discoverRoles } from "../src/roles.js";
+import { discoverRoles, parseTick } from "../src/roles.js";
 import { PeerManager } from "../src/runtime.js";
 import { PeerSidecar } from "../src/sidecar.js";
 import { loadConfig, readRoster } from "../src/state.js";
@@ -76,7 +76,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     ]);
     const mode = modePick?.split(" ")[0] as any;
     const peer = await manager.launch(ctx, role, task, mode);
-    ui.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${role.tick}s)`, "info");
+    ui.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(role.tick / 60)}m)`, "info");
     if (!sidecar) void openSidecar(ctx);
   }
 
@@ -94,6 +94,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   async function openSidecar(ctx: ExtensionContext): Promise<void> {
     let overlayTui: any = null;
+    // 1 Hz countdown refresh while the panel is open — cheap under pi's
+    // differential renderer, keeps `next Ns` live without streaming churn.
+    let countdown: ReturnType<typeof setInterval> | null = null;
     try {
       await (ctx.ui as any).custom<void>(
         (tui: any, theme: any, _kb: any, done: (r: void) => void) => {
@@ -140,6 +143,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             getMaxRows: () => overlayDims(tui).maxHeight,
           });
           manager.onUpdate = () => tui.requestRender();
+          countdown = setInterval(() => {
+            if (manager.active.length > 0) tui.requestRender();
+          }, 1000);
           sidecar = { component, handle: null, close: () => done(undefined) };
           return component as any;
         },
@@ -156,6 +162,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         },
       );
     } finally {
+      if (countdown) clearInterval(countdown);
       sidecar?.component.dispose();
       sidecar = null;
       manager.onUpdate = null;
@@ -180,7 +187,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       if (verb === "list") {
         const roles = discoverRoles(ctx.cwd);
         const lines = [
-          `roles: ${roles.map((r) => `${r.name} (${r.source}, tick ${r.tick}s, ≤${r.priorityCeiling})`).join(" · ") || "none found"}`,
+          `roles: ${roles.map((r) => `${r.name} (${r.source}, tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling})`).join(" · ") || "none found"}`,
           `active: ${manager.active.map((p) => `${p.name}[t${p.tickCount}${p.findings.length ? ` ◆${p.findings.length}` : ""}]`).join(" · ") || "none"}`,
           `usage: /peer (toggle sidecar) · /peer launch <role> <task…> [--fork|--compacted|--fresh] · /peer stop <name|all> · /peer retask <name> <task…> · /peer broadcast <text…>`,
         ];
@@ -192,9 +199,15 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const roles = discoverRoles(ctx.cwd);
         let taskWords = rest.slice(1);
         let mode: any;
-        taskWords = taskWords.filter((w) => {
+        let tickOverride: number | undefined;
+        taskWords = taskWords.filter((w, i, arr) => {
           if (w === "--fork" || w === "--compacted" || w === "--fresh") {
             mode = w.slice(2);
+            return false;
+          }
+          if (w === "--tick") return false;
+          if (arr[i - 1] === "--tick") {
+            tickOverride = parseTick(w); // minutes by default: --tick 15 = 15m
             return false;
           }
           return true;
@@ -211,8 +224,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         let task = taskWords.join(" ");
         if (!task && ui?.input) task = (await ui.input("Standing task for this peer", role.description)) ?? "";
         if (!task) task = role.description || "watch the main agent's work per your charter";
-        const peer = await manager.launch(ctx, role, task, mode);
-        ui?.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${role.tick}s) — ${peer.sessionId}`, "info");
+        const effRole = tickOverride ? { ...role, tick: tickOverride } : role;
+        const peer = await manager.launch(ctx, effRole, task, mode);
+        ui?.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(effRole.tick / 60)}m) — ${peer.sessionId}`, "info");
         if (!sidecar) void openSidecar(ctx);
         return;
       }
@@ -227,6 +241,20 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         } else {
           ui?.notify?.(`no active peer named "${target ?? ""}"`, "error");
         }
+        return;
+      }
+
+      if (verb === "talk") {
+        const name = rest[0] ?? "";
+        const text = rest.slice(1).join(" ");
+        if (!text) {
+          ui?.notify?.("usage: /peer talk <name> <message…>", "error");
+          return;
+        }
+        const res = await manager.talk(name, text, "operator");
+        if (res.status === "missing") ui?.notify?.(`no active peer named "${name}"`, "error");
+        else if (res.status === "busy") ui?.notify?.(`${name} is mid-tick — try again in a moment`, "warning");
+        else if (!sidecar) toggleSidecar(ctx); // the reply streams in the panel
         return;
       }
 
@@ -269,19 +297,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       role: Type.String({ description: "Role name (see peer_roster for available roles)." }),
       task: Type.String({ description: "The standing task, e.g. 'watch for scope creep vs the mission'." }),
       context: Type.Optional(Type.String({ description: "fork | compacted | fresh (default: role's choice)" })),
+      tickMinutes: Type.Optional(Type.Number({ description: "Override this peer's tick interval in MINUTES (min 1). Each peer has its own. The framework issues ticks; the peer itself can never change this." })),
     }),
     async execute(_id: string, params: any, _signal: unknown, _u: unknown, ctx: any) {
       track(ctx);
-      const role = discoverRoles(ctx.cwd).find((r) => r.name === params.role);
+      let role = discoverRoles(ctx.cwd).find((r) => r.name === params.role);
       if (!role) {
         const names = discoverRoles(ctx.cwd).map((r) => r.name).join(", ");
         return { content: [{ type: "text" as const, text: `Unknown role "${params.role}". Available: ${names}` }] };
       }
+      if (params.tickMinutes) role = { ...role, tick: Math.max(60, Math.floor(params.tickMinutes * 60)) };
       const peer = await manager.launch(ctx, role, params.task, params.context);
       return {
         content: [{
           type: "text" as const,
-          text: `Peer ${peer.name} launched: ${peer.address}\nsession ${peer.sessionId} (resume: pi --session ${peer.sessionFile})\ntick ${role.tick}s · ceiling ${role.priorityCeiling} · ${peer.contextMode} context`,
+          text: `Peer ${peer.name} launched: ${peer.address}\nsession ${peer.sessionId} (resume: pi --session ${peer.sessionFile})\ntick ${Math.round(role.tick / 60)}m · ceiling ${role.priorityCeiling} · ${peer.contextMode} context`,
         }],
       };
     },
@@ -295,7 +325,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     async execute(_id: string, _params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
       const roles = discoverRoles(ctx.cwd)
-        .map((r) => `- ${r.name} (${r.source}): ${r.description} [tick ${r.tick}s, ≤${r.priorityCeiling}, ${r.context}]`)
+        .map((r) => `- ${r.name} (${r.source}): ${r.description} [tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling}, ${r.context}]`)
         .join("\n");
       const active = manager.active
         .map((p) => `- ${p.name} (${p.role.name}) ${p.address} · tick ${p.tickCount} · ${p.status} · findings ${p.findings.length} · task: ${p.task}`)
@@ -307,6 +337,27 @@ export default function piPeerAgent(pi: ExtensionAPI) {
           text: `ROLES:\n${roles || "(none)"}\n\nACTIVE PEERS:\n${active || "(none)"}${persisted.length && !manager.active.length ? `\n\nroster.json lists ${persisted.length} peers from a previous run` : ""}`,
         }],
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "peer_talk",
+    label: "Talk to peer",
+    description:
+      "Send a direct message to one of your peer helpers and get its reply. Peers are long-running " +
+      "monitors bound to this session — consult them like colleagues: ask the observer what happened, " +
+      "ask the auditor to double-check a claim, ask a sentinel for its current read. The exchange is " +
+      "recorded in the peer's own session.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Peer callsign, e.g. sentinel-1 (see peer_roster)." }),
+      message: Type.String({ description: "Your message or question to the peer." }),
+    }),
+    async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
+      track(ctx);
+      const res = await manager.talk(params.name, params.message, "main-agent");
+      if (res.status === "missing") return { content: [{ type: "text" as const, text: `No active peer named ${params.name}. Use peer_roster to list peers, or peer_launch to spawn one.` }] };
+      if (res.status === "busy") return { content: [{ type: "text" as const, text: `${params.name} is mid-tick right now — retry in a few seconds.` }] };
+      return { content: [{ type: "text" as const, text: `${params.name} replies:\n\n${res.reply || "(empty reply)"}` }] };
     },
   });
 

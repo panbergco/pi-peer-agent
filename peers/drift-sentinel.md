@@ -1,7 +1,7 @@
 ---
 name: drift-sentinel
 description: Watches the main agent's work for scope creep and drift from the stated objective
-tick: 15
+tick: 5m
 priorityCeiling: steering
 context: compacted
 thinking: low

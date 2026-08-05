@@ -1,7 +1,7 @@
 ---
 name: evidence-auditor
 description: Audits the main agent's claims against actual evidence in the repository
-tick: 20
+tick: 10m
 priorityCeiling: steering
 context: fresh
 thinking: low

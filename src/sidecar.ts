@@ -153,7 +153,7 @@ export class PeerSidecar {
         row(fg(t, "dim", "  available roles:"));
         for (const r of roles.slice(0, 8)) {
           row("    " + fg(t, "accent", r.name) + fg(t, "dim", ` — ${truncateToWidth(r.description, Math.max(10, inner - r.name.length - 8))}`));
-          row(fg(t, "dim", `      tick ${r.tick}s · up to ${r.priorityCeiling} · ${r.context} context · ${r.source}`));
+          row(fg(t, "dim", `      tick ${Math.round(r.tick / 60)}m · up to ${r.priorityCeiling} · ${r.context} context · ${r.source}`));
         }
       }
       row("");
@@ -168,7 +168,8 @@ export class PeerSidecar {
         : peer.status === "stopped" ? fg(t, "dim", "○")
         : fg(t, "dim", "●");
       const secs = Math.max(0, Math.round((peer.nextTickAt - Date.now()) / 1000));
-      const tickInfo = peer.busy ? "thinking" : peer.status === "stopped" ? "stopped" : `next ${secs}s`;
+      const eta = secs >= 90 ? `${Math.ceil(secs / 60)}m` : `${secs}s`;
+      const tickInfo = peer.busy ? "thinking" : peer.status === "stopped" ? "stopped" : `next ${eta}`;
       const head =
         `${sel && this.focused ? fg(t, "accent", "❯") : " "} ${open ? "▾" : "▸"} ${dot} ` +
         `${sel ? fg(t, "accent", peer.name) : peer.name} ` +
@@ -176,7 +177,7 @@ export class PeerSidecar {
       row(truncateToWidth(head, inner));
 
       if (open) {
-        row(fg(t, "dim", `   ${peer.modelLabel} · id ${shortId(peer.sessionId)} · ${peer.contextMode} · ${peer.role.tick}s base`));
+        row(fg(t, "dim", `   ${peer.modelLabel} · id ${shortId(peer.sessionId)} · ${peer.contextMode} · tick ${Math.round(peer.role.tick / 60)}m`));
         const paneW = inner - 4;
         const all = this.paneLines(peer, paneW, t);
         const off = this.scroll.get(peer.name) ?? 0;

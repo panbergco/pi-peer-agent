@@ -88,7 +88,10 @@ const PROTOCOL = `Respond with your working notes (optional, brief), then END yo
 QUIET
 or
 FINDING[info|steering|interrupt]: <one self-contained, actionable paragraph>
-QUIET means: nothing worth the main agent's attention. Findings interrupt a working agent — they must earn it.`;
+QUIET means: nothing worth the main agent's attention. Findings interrupt a working agent — they must earn it.
+Your watch is STANDING: you are a long-running peer, not a one-off task. Never announce completion,
+never stop yourself, never wind down — "the work seems finished" is itself just QUIET. Only the
+operator or the main agent ends your watch.`;
 
 export class PeerManager {
   peers = new Map<string, Peer>();
@@ -109,12 +112,21 @@ export class PeerManager {
     return [...this.peers.values()].filter((p) => p.status !== "stopped");
   }
 
+  private renderPending = false;
+
+  /** Throttled: streaming fires per token, but the TUI repaints at most
+   *  ~12 fps — token-rate full re-renders read as flicker. */
   private notify(): void {
-    try {
-      this.onUpdate?.();
-    } catch {
-      /* sidecar must never break the runtime */
-    }
+    if (this.renderPending) return;
+    this.renderPending = true;
+    setTimeout(() => {
+      this.renderPending = false;
+      try {
+        this.onUpdate?.();
+      } catch {
+        /* sidecar must never break the runtime */
+      }
+    }, 80);
   }
 
   private refreshRoster(cwd: string): void {
@@ -265,7 +277,7 @@ export class PeerManager {
     this.pi.sendMessage(
       {
         customType: "peer-notice",
-        content: `⇄ peer ${name} (${role.name}) is now watching — ${contextMode} context · tick ${role.tick}s · ${peer.modelLabel}\n   resume standalone: pi --session ${peer.sessionFile}`,
+        content: `⇄ peer ${name} (${role.name}) is now watching — ${contextMode} context · tick ${Math.round(role.tick / 60)}m · ${peer.modelLabel}\n   resume standalone: pi --session ${peer.sessionFile}`,
         display: true,
       },
       { deliverAs: "nextTurn" },
@@ -448,6 +460,47 @@ export class PeerManager {
     } catch (err) {
       appendEvent(cwd, "finding.failed", { peer: peer.name, id: finding.id, error: String(err).slice(0, 200) });
     }
+  }
+
+  /** Direct conversation with a peer — outside the tick, no verdict, no
+   *  delivery. The exchange is recorded in the peer's real session file and
+   *  the peer's reply is RETURNED, so the main agent can consult its helpers
+   *  synchronously. `from` names the sender for attribution. */
+  async talk(
+    name: string,
+    text: string,
+    from: "operator" | "main-agent" = "operator",
+  ): Promise<{ status: "ok" | "busy" | "missing"; reply?: string }> {
+    const peer = this.peers.get(name);
+    if (!peer || peer.status === "stopped") return { status: "missing" };
+    if (peer.busy) return { status: "busy" };
+    peer.busy = true;
+    peer.status = "thinking";
+    peer.pane.push({ kind: "user", text: from === "main-agent" ? `[main agent] ${text}` : text });
+    appendEvent(this.ctx?.cwd ?? process.cwd(), "talk.sent", { peer: name, from, chars: text.length });
+    this.notify();
+    let reply = "";
+    try {
+      await peer.session.prompt(
+        `DIRECT MESSAGE from the ${from === "main-agent" ? "MAIN AGENT you are bound to" : "human operator"} (conversational — answer directly and briefly; this is not a tick, no verdict line): ${text}`,
+      );
+      const msgs: any[] = peer.session.state?.messages ?? [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i]?.role === "assistant") {
+          reply = textOfBlocks(msgs[i].content);
+          break;
+        }
+      }
+      appendEvent(this.ctx?.cwd ?? process.cwd(), "talk.replied", { peer: name, from, chars: reply.length });
+    } catch (err) {
+      peer.pane.push({ kind: "note", text: `error: ${String(err).slice(0, 120)}` });
+      reply = `(peer errored: ${String(err).slice(0, 120)})`;
+    } finally {
+      peer.busy = false;
+      if (peer.status !== "stopped") peer.status = "waiting";
+      this.notify();
+    }
+    return { status: "ok", reply };
   }
 
   retask(name: string, task: string): boolean {

@@ -10,6 +10,20 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ContextMode, PeerRole, Priority } from "./types.js";
 
+/** Tick spec (operator ruling: MINUTES are the unit — peers are long-running
+ *  colleagues, not hyperactive watchers). Plain number = minutes; `10m`
+ *  minutes; `90s` tolerated but clamped to the 1-minute floor. Returns SECONDS
+ *  for internal timers. */
+export function parseTick(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const m = String(raw).trim().match(/^(\d+)\s*(s|m)?$/i);
+  if (!m) return undefined;
+  const n = Number.parseInt(m[1]!, 10);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const seconds = m[2]?.toLowerCase() === "s" ? n : n * 60;
+  return Math.max(60, seconds);
+}
+
 const PRIORITIES = new Set(["info", "steering", "interrupt"]);
 const CONTEXTS = new Set(["fork", "compacted", "fresh"]);
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
@@ -39,7 +53,7 @@ function parseRole(path: string, source: string): PeerRole | null {
   const name = (fields["name"] ?? basename(path, ".md")).trim();
   if (!name || !body) return null;
 
-  const tick = Math.max(3, Number.parseInt(fields["tick"] ?? "15", 10) || 15);
+  const tick = parseTick(fields["tick"]) ?? 300; // default: 5 minutes
   const ceiling = (fields["priorityCeiling"] ?? "steering") as Priority;
   const context = (fields["context"] ?? "compacted") as ContextMode;
   const tools = (fields["tools"] ?? "read, grep, find, ls")

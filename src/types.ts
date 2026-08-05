@@ -33,7 +33,7 @@ export interface PeerRole {
 
 /** One transcript item in a peer's sidecar pane. */
 export interface PaneEntry {
-  kind: "tick" | "thinking" | "text" | "tool" | "finding" | "note";
+  kind: "tick" | "thinking" | "text" | "tool" | "finding" | "note" | "user";
   text: string;
   streaming?: boolean;
   priority?: Priority;
