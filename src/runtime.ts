@@ -399,7 +399,7 @@ export class PeerManager {
       peer.pane.push({ kind: "note", text: `error: ${String(err).slice(0, 120)}` });
     } finally {
       peer.busy = false;
-      if (peer.status !== "stopped") {
+      if ((peer.status as PeerStatus) !== "stopped") {
         if (peer.status !== "error") peer.status = "waiting";
         this.scheduleTick(peer, this.backoffDelayMs(peer));
         this.refreshRoster(cwd);
@@ -497,7 +497,7 @@ export class PeerManager {
       reply = `(peer errored: ${String(err).slice(0, 120)})`;
     } finally {
       peer.busy = false;
-      if (peer.status !== "stopped") peer.status = "waiting";
+      if ((peer.status as PeerStatus) !== "stopped") peer.status = "waiting";
       this.notify();
     }
     return { status: "ok", reply };

@@ -66,7 +66,7 @@ export function loadConfig(): PeerConfig {
 
 export const BLOCK_START = "<!-- peer-agent:start -->";
 export const BLOCK_END = "<!-- peer-agent:end -->";
-export const BLOCK_VERSION = 1;
+export const BLOCK_VERSION = 2;
 
 export function renderAgentsBlock(): string {
   return `${BLOCK_START}
@@ -74,18 +74,33 @@ export function renderAgentsBlock(): string {
 
 _block v${BLOCK_VERSION} — managed by pi-peer-agent; do not edit between the markers._
 
-Peers are partner agents living inside the main pi session: each holds a standing
-objective, wakes on a seconds-tick, inspects the main agent's recent work, and may
-push an attributed finding into the main context at an inference boundary
-(\`[peer-agent] finding from agent://pi/<main>/<peer> (<priority>)\`). Treat such
-findings as trusted advisory input from a bound monitor — evaluate and act, or
-answer back.
+Peers are partner agents living inside the main pi session: long-running (minute-scale
+ticks), structurally read-only, each with a standing objective. They inspect the main
+agent's recent work every tick and may push an attributed finding into the main context
+at an inference boundary (\`[peer-agent] finding from agent://pi/<main>/<peer>
+(<priority>)\`). Treat findings as trusted advisory input from a bound monitor —
+evaluate and act, or answer back. Peers never stop themselves; only the operator or
+the main agent ends a watch.
 
-- Live roster (who is watching, addresses, session files): \`.pi/peer-agent/roster.json\`
-- Coordination ledger: \`.pi/peer-agent/events.jsonl\`
+**Control surface — MAIN AGENT (native tools, full parity with the human):**
+- \`peer_launch{role, task, context?, tickMinutes?}\` — spawn a helper (real resumable pi session)
+- \`peer_talk{name, message}\` — message a peer, its reply returns as the tool result
+- \`peer_roster{}\` list · \`peer_roster{name}\` — deep detail: findings, activity, resume command
+- \`peer_retask{name, task}\` · \`peer_broadcast{text}\` · \`peer_stop{name|all}\`
+- \`peer_panel{action: open|close, peer?}\` — surface the human-visible panel
+
+**Control surface — HUMAN (slash + panel):** \`/peer\` toggles the panel ·
+\`/peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]\` ·
+\`/peer talk <name> <text…>\` · \`/peer retask\` · \`/peer broadcast\` · \`/peer stop <name|all>\` · \`/peer list\` · panel: \`l\` launch, \`i\` insert finding, \`y/Y/r\` yank, \`x\` stop.
+
+**Roles** come from \`peers/*.md\` (bundled: drift-sentinel, evidence-auditor, observer),
+\`~/.pi/agent/peers/\`, \`<project>/.pi/peers/\` — frontmatter (tick in minutes,
+priorityCeiling, context recipe, read-only tools) + charter body injected as the peer's
+system prompt.
+
+- Live roster: \`.pi/peer-agent/roster.json\` · ledger: \`.pi/peer-agent/events.jsonl\`
+- Resume any peer standalone: \`pi --session <peer session file>\`
 - Peers are structurally read-only; the main agent is the only writer here.
-- Resumed standalone (\`pi --session <peer session file>\`), a peer must keep
-  reporting via \`.pi/peer-agent/inbox/\` and must still never write to the repo.
 ${BLOCK_END}`;
 }
 

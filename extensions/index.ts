@@ -98,13 +98,16 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     // differential renderer, keeps `next Ns` live without streaming churn.
     let countdown: ReturnType<typeof setInterval> | null = null;
     try {
-      await (ctx.ui as any).custom<void>(
-        (tui: any, theme: any, _kb: any, done: (r: void) => void) => {
+      await (ctx.ui as any).custom(
+        (tui: any, theme: any, kb: any, done: (r: void) => void) => {
           overlayTui = tui;
           const component = new PeerSidecar({
+            tui,
+            theme,
+            keybindings: kb ?? { matches: () => false },
             getPeers: () => manager.active,
             getRoles: () => discoverRoles(ctx.cwd),
-            theme,
+            getMaxRows: () => overlayDims(tui).maxHeight,
             onClose: () => done(undefined),
             onUnfocus: () => {
               sidecar?.handle?.unfocus?.();
@@ -118,6 +121,24 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               sidecar?.handle?.unfocus?.();
               if (sidecar) sidecar.component.focused = false;
               void interactiveLaunch(lastCtx ?? ctx);
+            },
+            onLaunchDirect: (roleName: string, task: string) => {
+              const role = discoverRoles(ctx.cwd).find((r) => r.name === roleName);
+              if (!role) {
+                (lastCtx ?? ctx).ui?.notify?.(`unknown role "${roleName}" — /peer list`, "error");
+                return;
+              }
+              void manager.launch(lastCtx ?? ctx, role, task).then(() => tui.requestRender());
+            },
+            onTalk: (name: string, text: string) => {
+              void manager.talk(name, text, "operator").then((res) => {
+                if (res.status !== "ok") (lastCtx ?? ctx).ui?.notify?.(`${name}: ${res.status}`, "warning");
+                tui.requestRender();
+              });
+            },
+            onRetask: (name: string, task: string) => {
+              manager.retask(name, task);
+              (lastCtx ?? ctx).ui?.notify?.(`${name} retasked`, "info");
             },
             insertText: (text: string) => {
               const ui: any = (lastCtx ?? ctx).ui;
@@ -140,7 +161,6 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               })();
             },
             requestRender: () => tui.requestRender(),
-            getMaxRows: () => overlayDims(tui).maxHeight,
           });
           manager.onUpdate = () => tui.requestRender();
           countdown = setInterval(() => {
@@ -304,7 +324,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       let role = discoverRoles(ctx.cwd).find((r) => r.name === params.role);
       if (!role) {
         const names = discoverRoles(ctx.cwd).map((r) => r.name).join(", ");
-        return { content: [{ type: "text" as const, text: `Unknown role "${params.role}". Available: ${names}` }] };
+        return { content: [{ type: "text" as const, text: `Unknown role "${params.role}". Available: ${names}` }], details: {} };
       }
       if (params.tickMinutes) role = { ...role, tick: Math.max(60, Math.floor(params.tickMinutes * 60)) };
       const peer = await manager.launch(ctx, role, params.task, params.context);
@@ -312,7 +332,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         content: [{
           type: "text" as const,
           text: `Peer ${peer.name} launched: ${peer.address}\nsession ${peer.sessionId} (resume: pi --session ${peer.sessionFile})\ntick ${Math.round(role.tick / 60)}m · ceiling ${role.priorityCeiling} · ${peer.contextMode} context`,
-        }],
+        }], details: {},
       };
     },
   });
@@ -332,7 +352,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       if (params.name) {
         const p = manager.peers.get(params.name);
         if (!p || p.status === "stopped") {
-          return { content: [{ type: "text" as const, text: `No active peer named ${params.name}.` }] };
+          return { content: [{ type: "text" as const, text: `No active peer named ${params.name}.` }], details: {} };
         }
         const etaS = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
         const findings = p.findings.length
@@ -357,8 +377,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
               `RECENT ACTIVITY:`,
               recent,
             ].join("\n"),
-          }],
-        };
+          }], details: {},
+      };
       }
       const roles = discoverRoles(ctx.cwd)
         .map((r) => `- ${r.name} (${r.source}): ${r.description} [tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling}, ${r.context}]`)
@@ -371,7 +391,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         content: [{
           type: "text" as const,
           text: `ROLES:\n${roles || "(none)"}\n\nACTIVE PEERS (peer_roster with name for full detail):\n${active || "(none)"}${persisted.length && !manager.active.length ? `\n\nroster.json lists ${persisted.length} peers from a previous run` : ""}`,
-        }],
+        }], details: {},
       };
     },
   });
@@ -388,10 +408,10 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     }),
     async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
-      if (!ctx.hasUI) return { content: [{ type: "text" as const, text: "No interactive UI in this session mode." }] };
+      if (!ctx.hasUI) return { content: [{ type: "text" as const, text: "No interactive UI in this session mode." }], details: {} };
       if (params.action === "close") {
         if (sidecar) sidecar.close();
-        return { content: [{ type: "text" as const, text: "Panel closed." }] };
+        return { content: [{ type: "text" as const, text: "Panel closed." }], details: {} };
       }
       if (!sidecar) void openSidecar(lastCtx ?? ctx);
       // Selection may need the panel a beat to mount.
@@ -399,7 +419,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       if (target) {
         setTimeout(() => sidecar?.component.selectPeer(target), 300);
       }
-      return { content: [{ type: "text" as const, text: `Panel opened${target ? ` on ${target}` : ""}.` }] };
+      return { content: [{ type: "text" as const, text: `Panel opened${target ? ` on ${target}` : ""}.` }], details: {} };
     },
   });
 
@@ -418,9 +438,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
       const res = await manager.talk(params.name, params.message, "main-agent");
-      if (res.status === "missing") return { content: [{ type: "text" as const, text: `No active peer named ${params.name}. Use peer_roster to list peers, or peer_launch to spawn one.` }] };
-      if (res.status === "busy") return { content: [{ type: "text" as const, text: `${params.name} is mid-tick right now — retry in a few seconds.` }] };
-      return { content: [{ type: "text" as const, text: `${params.name} replies:\n\n${res.reply || "(empty reply)"}` }] };
+      if (res.status === "missing") return { content: [{ type: "text" as const, text: `No active peer named ${params.name}. Use peer_roster to list peers, or peer_launch to spawn one.` }], details: {} };
+      if (res.status === "busy") return { content: [{ type: "text" as const, text: `${params.name} is mid-tick right now — retry in a few seconds.` }], details: {} };
+      return { content: [{ type: "text" as const, text: `${params.name} replies:\n\n${res.reply || "(empty reply)"}` }], details: {} };
     },
   });
 
@@ -435,7 +455,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
       const ok = manager.retask(params.name, params.task);
-      return { content: [{ type: "text" as const, text: ok ? `${params.name} retasked.` : `No active peer named ${params.name}.` }] };
+      return { content: [{ type: "text" as const, text: ok ? `${params.name} retasked.` : `No active peer named ${params.name}.` }], details: {} };
     },
   });
 
@@ -447,7 +467,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     async execute(_id: string, params: any, _s: unknown, _u: unknown, ctx: any) {
       track(ctx);
       const n = manager.broadcast(params.text);
-      return { content: [{ type: "text" as const, text: `Broadcast delivered to ${n} peer${n === 1 ? "" : "s"}.` }] };
+      return { content: [{ type: "text" as const, text: `Broadcast delivered to ${n} peer${n === 1 ? "" : "s"}.` }], details: {} };
     },
   });
 
@@ -460,10 +480,10 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       track(ctx);
       if (params.name === "all") {
         await manager.stopAll();
-        return { content: [{ type: "text" as const, text: "All peers stopped." }] };
+        return { content: [{ type: "text" as const, text: "All peers stopped." }], details: {} };
       }
       const ok = await manager.stop(params.name);
-      return { content: [{ type: "text" as const, text: ok ? `${params.name} stopped (session retained).` : `No active peer named ${params.name}.` }] };
+      return { content: [{ type: "text" as const, text: ok ? `${params.name} stopped (session retained).` : `No active peer named ${params.name}.` }], details: {} };
     },
   });
 

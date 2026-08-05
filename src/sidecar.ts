@@ -1,103 +1,316 @@
-/** The peer sidecar — a docked overlay that reads like a real pi session (spec §8).
+/** The peers panel — btw-faithful overlay (spec §8).
  *
- * Accordion of peers: each individually expandable, scrollable (keys + mouse
- * wheel), entry actions `i` (insert into the main prompt) and `y` (OSC-52 yank).
- * All colors are theme-derived; transcript idioms mirror pi's own (▍ streaming
- * cursor, dim thinking, one-line tool rows).
+ * Faithful to pi-btw-sidecar's proven mechanics:
+ *  - a REAL embedded pi-tui Editor at the bottom: type to the selected peer,
+ *    Enter sends; full editing/paste/cursor UX (rendered unfocused for
+ *    geometric stability — btw's trick);
+ *  - FIXED dialog height (padded viewport) so the panel never shifts with
+ *    background or content;
+ *  - follow-tail transcript with maxScroll clamping; wheel + Up/Down/PgUp/PgDn
+ *    scroll; Tab cycles peers;
+ *  - /commands inside the input (/launch, /stop, /close, /insert, /yank,
+ *    /resume, /retask, /help) — no single-letter hotkeys stealing typed text.
+ *
+ * Frame color is deliberately non-theme: deep purple = "this is an overlay".
+ * Bright purple = keys go here; dark purple = your typing goes to the main
+ * prompt.
  */
 
-import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import {
+  Container,
+  Editor,
+  Key,
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+  type EditorTheme,
+  type Focusable,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import type { Peer } from "./runtime.js";
 import type { PeerRole } from "./types.js";
 import { shortId } from "./types.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-type Theme = { fg(role: string, text: string): string };
+type Theme = { fg(role: string, text: string): string; bold?(text: string): string };
 
 export interface SidecarOptions {
+  tui: TUI;
+  theme: Theme;
+  keybindings: { matches(data: string, id: string): boolean };
   getPeers: () => Peer[];
   getRoles: () => PeerRole[];
-  theme: Theme;
+  getMaxRows: () => number;
   onClose: () => void;
   onUnfocus: () => void;
   onStop: (name: string) => void;
+  /** Interactive launch via dialogs (no-args /launch). */
   onLaunch: () => void;
+  /** Direct launch from panel input: /launch <role> <task…>. */
+  onLaunchDirect: (role: string, task: string) => void;
+  onTalk: (name: string, text: string) => void;
+  onRetask: (name: string, task: string) => void;
   insertText: (text: string) => void;
   yankText: (text: string, label: string) => void;
   requestRender: () => void;
-  /** Current overlay row budget (btw pattern: derived from terminal each render). */
-  getMaxRows: () => number;
 }
 
-function fg(theme: Theme, role: string, text: string): string {
-  try {
-    return theme.fg(role, text);
-  } catch {
-    return text;
-  }
-}
+const LIST_MAX = 6;
 
-export class PeerSidecar {
-  focused = false;
+export class PeerSidecar extends Container implements Focusable {
+  private readonly input: Editor;
   private selected = 0;
-  private expanded = new Set<string>();
-  /** Per-peer scroll offset measured in lines from the tail (0 = follow). */
-  private scroll = new Map<string, number>();
-  private mouseEnabled = false;
+  private scrollOffset = 0;
+  private follow = true;
+  private viewportHeight = 8;
+  private flash = "";
+  private _focused = false;
 
-  /** Recomputed each render from the overlay's actual row budget. */
-  private paneHeight = 12;
+  get focused(): boolean {
+    return this._focused;
+  }
+
+  set focused(value: boolean) {
+    this._focused = value;
+    (this.input as any).focused = value;
+  }
 
   constructor(private opts: SidecarOptions) {
+    super();
+    const editorTheme: EditorTheme = {
+      borderColor: (s: string) => this.purple(s),
+      selectList: {
+        selectedPrefix: (s: string) => this.safeFg("accent", s),
+        selectedText: (s: string) => s,
+        description: (s: string) => this.safeFg("dim", s),
+        scrollInfo: (s: string) => this.safeFg("dim", s),
+        noMatch: (s: string) => this.safeFg("dim", s),
+      },
+    } as EditorTheme;
+    this.input = new Editor(opts.tui, editorTheme, { paddingX: 0 });
+    (this.input as any).onSubmit = (value: string) => this.submit(value);
     // SGR mouse reporting so wheel events reach handleInput (btw-proven).
-    process.stdout.write("\x1b[?1000h\x1b[?1006h");
-    this.mouseEnabled = true;
+    (opts.tui as any).terminal?.write?.("\x1b[?1000h\x1b[?1006h");
   }
 
   dispose(): void {
-    if (this.mouseEnabled) {
-      process.stdout.write("\x1b[?1000l\x1b[?1006l");
-      this.mouseEnabled = false;
+    (this.opts.tui as any).terminal?.write?.("\x1b[?1000l\x1b[?1006l");
+  }
+
+  // ---------------------------------------------------------------- helpers
+
+  private safeFg(role: string, text: string): string {
+    try {
+      return this.opts.theme.fg(role, text);
+    } catch {
+      return text;
     }
   }
 
-  // ------------------------------------------------------------------ render
+  private purple(s: string): string {
+    return `\x1b[38;5;${this._focused ? 135 : 54}m${s}\x1b[39m`;
+  }
 
-  private paneLines(peer: Peer, width: number, theme: Theme): string[] {
-    const t = theme;
+  private selectedPeer(): Peer | undefined {
+    return this.opts.getPeers()[this.selected];
+  }
+
+  private setFlash(text: string): void {
+    this.flash = text;
+    this.opts.requestRender();
+  }
+
+  /** External selection (peer_panel tool). */
+  selectPeer(name: string): boolean {
+    const idx = this.opts.getPeers().findIndex((p) => p.name === name);
+    if (idx === -1) return false;
+    this.selected = idx;
+    this.follow = true;
+    this.opts.requestRender();
+    return true;
+  }
+
+  // ----------------------------------------------------------------- input
+
+  private submit(raw: string): void {
+    const value = raw.trim();
+    this.input.setText("");
+    if (!value) return;
+    if (value.startsWith("/")) {
+      this.command(value.slice(1));
+      return;
+    }
+    const peer = this.selectedPeer();
+    if (!peer) {
+      this.setFlash("no peer selected — /launch first");
+      return;
+    }
+    this.follow = true;
+    this.opts.onTalk(peer.name, value);
+  }
+
+  private command(cmd: string): void {
+    const [verb, ...rest] = cmd.split(/\s+/).filter(Boolean);
+    const peer = this.selectedPeer();
+    switch ((verb ?? "").toLowerCase()) {
+      case "help":
+        this.setFlash("/launch [role task…] · /stop [name] · /retask <task…> · /insert · /yank · /resume · /close");
+        return;
+      case "launch":
+        if (rest.length >= 2) this.opts.onLaunchDirect(rest[0]!, rest.slice(1).join(" "));
+        else this.opts.onLaunch();
+        return;
+      case "stop": {
+        const name = rest[0] ?? peer?.name;
+        if (name) this.opts.onStop(name);
+        else this.setFlash("no peer to stop");
+        return;
+      }
+      case "retask":
+        if (peer && rest.length) this.opts.onRetask(peer.name, rest.join(" "));
+        else this.setFlash("usage: /retask <new task…>");
+        return;
+      case "insert": {
+        const f = peer?.findings[peer.findings.length - 1];
+        if (f && peer) this.opts.insertText(`Peer ${peer.name} (${peer.role.name}) found [tick ${f.tick}]: ${f.body}`);
+        else this.setFlash("no finding to insert");
+        return;
+      }
+      case "yank": {
+        const f = peer?.findings[peer.findings.length - 1];
+        if (f) this.opts.yankText(f.body, "finding");
+        else if (peer) this.opts.yankText(peer.pane.map((e) => e.text).join("\n"), `${peer.name} pane`);
+        else this.setFlash("nothing to yank");
+        return;
+      }
+      case "resume":
+        if (peer) this.opts.yankText(`pi --session ${peer.sessionFile}`, "resume command");
+        else this.setFlash("no peer selected");
+        return;
+      case "close":
+        this.opts.onClose();
+        return;
+      default:
+        this.setFlash(`unknown /${verb ?? ""} — try /help`);
+    }
+  }
+
+  private mouseDelta(data: string): number | null {
+    const m = data.match(/^\x1b\[<(\d+);\d+;\d+[Mm]$/);
+    if (!m) return null;
+    const btn = Number(m[1]);
+    if ((btn & 64) !== 64) return null;
+    return (btn & 1) === 0 ? -3 : 3;
+  }
+
+  private scrollBy(delta: number): void {
+    if (delta < 0) this.follow = false;
+    this.scrollOffset = Math.max(0, this.scrollOffset + delta);
+    this.opts.requestRender();
+  }
+
+  handleInput(data: string): void {
+    const wheel = this.mouseDelta(data);
+    if (wheel !== null) {
+      this.scrollBy(wheel);
+      return;
+    }
+    if (matchesKey(data, Key.pageUp)) {
+      this.scrollBy(-(Math.max(1, this.viewportHeight - 1)));
+      return;
+    }
+    if (matchesKey(data, Key.pageDown)) {
+      this.scrollBy(Math.max(1, this.viewportHeight - 1));
+      return;
+    }
+    if (matchesKey(data, Key.up)) {
+      this.scrollBy(-1);
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.scrollBy(1);
+      return;
+    }
+    if (matchesKey(data, Key.tab)) {
+      const n = this.opts.getPeers().length;
+      if (n > 0) {
+        this.selected = (this.selected + 1) % n;
+        this.follow = true;
+        this.scrollOffset = 0;
+        this.opts.requestRender();
+      }
+      return;
+    }
+    if (matchesKey(data, Key.escape)) {
+      if (this.input.getText().length > 0) {
+        this.input.setText("");
+        this.opts.requestRender();
+      } else {
+        this.opts.onUnfocus();
+      }
+      return;
+    }
+    if (this.opts.keybindings.matches(data, "app.clear")) {
+      if (this.input.getText().length > 0) {
+        this.input.setText("");
+        this.opts.requestRender();
+        return;
+      }
+      this.opts.onClose();
+      return;
+    }
+    (this.input as any).handleInput(data);
+  }
+
+  // ---------------------------------------------------------------- render
+
+  private frameLine(content: string, inner: number): string {
+    const truncated = truncateToWidth(content, inner, "");
+    const pad = Math.max(0, inner - visibleWidth(truncated));
+    return `${this.purple("│")}${truncated}${" ".repeat(pad)}${this.purple("│")}`;
+  }
+
+  private ruleLine(inner: number): string {
+    return this.purple(`├${"─".repeat(inner)}┤`);
+  }
+
+  private titleLine(inner: number): string {
+    const peers = this.opts.getPeers();
+    const sel = this.selectedPeer();
+    const title = ` PEERS · ${peers.length} watching${sel ? ` · ${sel.name}` : ""} `;
+    const text = truncateToWidth(title, Math.max(1, inner - 2), "…");
+    const right = Math.max(0, inner - 2 - visibleWidth(text));
+    return `${this.purple("╭──")}${this.safeFg("accent", text)}${this.purple(`${"─".repeat(right)}╮`)}`;
+  }
+
+  private paneLines(peer: Peer, width: number): string[] {
+    const t = this.opts.theme;
     const lines: string[] = [];
     for (const entry of peer.pane) {
-      if (entry.kind === "tick") {
-        if (entry.text === "·") {
-          // QUIET/skip ticks compress into the previous strip line.
-          const prev = lines[lines.length - 1];
-          if (prev !== undefined && /^·+$/.test(prev.replace(/\x1b\[[0-9;]*m/g, ""))) {
-            lines[lines.length - 1] = fg(t, "dim", prev.replace(/\x1b\[[0-9;]*m/g, "") + "·");
-          } else {
-            lines.push(fg(t, "dim", "·"));
-          }
-        } else {
-          lines.push(fg(t, "dim", entry.text));
-        }
-        continue;
-      }
-      // Streaming cursor is budgeted INSIDE the width so it can never push
-      // a line past the right border.
-      const cursor = entry.streaming ? fg(t, "warning", " ▍") : "";
+      const cursor = entry.streaming ? this.safeFg("warning", " ▍") : "";
       const bodyWidth = entry.streaming ? width - 2 : width;
-      if (entry.kind === "thinking") {
-        const wrapped = wrapTextWithAnsi(entry.text, bodyWidth);
-        for (const l of wrapped) lines.push(fg(t, "dim", l));
+      if (entry.kind === "tick") {
+        const prev = lines[lines.length - 1] ?? "";
+        if (entry.text === "·" && /^·+$/.test(prev.replace(/\x1b\[[0-9;]*m/g, ""))) {
+          lines[lines.length - 1] = this.safeFg("dim", prev.replace(/\x1b\[[0-9;]*m/g, "") + "·");
+        } else {
+          lines.push(this.safeFg("dim", entry.text));
+        }
+      } else if (entry.kind === "user") {
+        lines.push(this.safeFg("accent", `❯ ${truncateToWidth(entry.text, width - 2)}`));
+      } else if (entry.kind === "thinking") {
+        for (const l of wrapTextWithAnsi(entry.text, bodyWidth)) lines.push(this.safeFg("dim", l));
         if (cursor && lines.length) lines[lines.length - 1] = truncateToWidth(lines[lines.length - 1]!, width - 2) + cursor;
       } else if (entry.kind === "tool") {
-        lines.push(fg(t, "dim", `» ${truncateToWidth(entry.text, width - 5)}`) + cursor);
+        lines.push(this.safeFg("dim", `» ${truncateToWidth(entry.text, width - 5)}`) + cursor);
       } else if (entry.kind === "finding") {
         const color = entry.priority === "interrupt" ? "error" : entry.priority === "steering" ? "accent" : "dim";
-        lines.push(fg(t, color, `◆ FINDING ${entry.priority ?? ""}`));
-        for (const l of wrapTextWithAnsi(entry.text, width - 2)) lines.push(fg(t, color, `  ${l}`));
+        lines.push(this.safeFg(color, `◆ FINDING ${entry.priority ?? ""}`));
+        for (const l of wrapTextWithAnsi(entry.text, width - 2)) lines.push(this.safeFg(color, `  ${l}`));
       } else if (entry.kind === "note") {
-        lines.push(fg(t, "warning", truncateToWidth(`! ${entry.text}`, width)));
+        lines.push(this.safeFg("warning", truncateToWidth(`! ${entry.text}`, width)));
       } else {
         for (const l of wrapTextWithAnsi(entry.text, bodyWidth)) lines.push(l);
         if (cursor && lines.length) lines[lines.length - 1] = truncateToWidth(lines[lines.length - 1]!, width - 2) + cursor;
@@ -106,186 +319,120 @@ export class PeerSidecar {
     return lines;
   }
 
-  render(width: number): string[] {
-    const t = this.opts.theme;
+  private emptyStateLines(inner: number): string[] {
+    const lines: string[] = [];
+    lines.push("");
+    lines.push("  " + this.safeFg("accent", "No peers watching yet."));
+    lines.push("");
+    for (const l of [
+      "  A peer is a partner agent living in this session: it wakes on its own",
+      "  tick (minutes), inspects what the main agent just did, and pushes a",
+      "  finding into the conversation the moment something is wrong. Each peer",
+      "  is a real pi session you can resume in any terminal.",
+    ])
+      lines.push(this.safeFg("dim", l));
+    lines.push("");
+    lines.push("  " + this.safeFg("accent", "type /launch to start one") + this.safeFg("dim", "  (or /launch <role> <task…>)"));
+    lines.push("");
+    const roles = this.opts.getRoles();
+    if (roles.length) {
+      lines.push(this.safeFg("dim", "  available roles:"));
+      for (const r of roles.slice(0, 8)) {
+        lines.push("    " + this.safeFg("accent", r.name) + this.safeFg("dim", ` — ${r.description}`));
+        lines.push(this.safeFg("dim", `      tick ${Math.round(r.tick / 60)}m · up to ${r.priorityCeiling} · ${r.context} context · ${r.source}`));
+      }
+    }
+    return lines;
+  }
+
+  private inputFrameLines(width: number): string[] {
+    const target = Math.max(1, width - 2);
+    const prev = (this.input as any).focused;
+    // btw's stability trick: render the editor unfocused so CURSOR_MARKER
+    // doesn't perturb the frame; the overlay still owns keyboard input.
+    (this.input as any).focused = false;
+    try {
+      return (this.input.render(target) as string[]).map((l) => `${this.purple("│")}${l}${this.purple("│")}`);
+    } finally {
+      (this.input as any).focused = prev;
+    }
+  }
+
+  override render(width: number): string[] {
+    const dialogWidth = Math.max(40, width);
+    const inner = dialogWidth - 2;
     const peers = this.opts.getPeers();
-    // Selection stays in bounds even when peers stop underneath it.
     if (this.selected >= peers.length) this.selected = Math.max(0, peers.length - 1);
-    const inner = Math.max(20, width - 2);
-    // Viewport budget: overlay rows minus chrome (title, separator, hints,
-    // border) and per-peer header/detail/resume rows — the rest is pane space
-    // for the expanded peers (btw's transcriptViewportHeight discipline).
-    const chrome = 4 + peers.length + [...this.expanded].length * 3;
-    const expandedCount = Math.max(1, [...this.expanded].length);
-    this.paneHeight = Math.max(8, Math.floor((this.opts.getMaxRows() - chrome) / expandedCount));
-    const out: string[] = [];
-    // Operator override of the theme-only rule: the OUTER frame is deep purple
-    // so the sidecar unmistakably reads as an overlay floating above the
-    // session. Bright purple = keys go HERE; dark purple = keys are back in
-    // your editor (panel just watching). fg-only escape so no attrs leak.
-    const bar = (s: string) => `\x1b[38;5;${this.focused ? 135 : 54}m${s}\x1b[39m`;
+    const sel = this.selectedPeer();
 
-    const title = ` PEERS · ${peers.length} watching `;
-    const pad = Math.max(0, inner - visibleWidth(title) - 1);
-    out.push(bar("╭─") + fg(t, "accent", title) + bar("─".repeat(pad) + "╮"));
-
-    const row = (content: string) => {
-      const w = visibleWidth(content);
-      const padded = w >= inner ? truncateToWidth(content, inner) : content + " ".repeat(inner - w);
-      out.push(bar("│") + padded + bar("│"));
-    };
-
-    if (peers.length === 0) {
-      // Empty state: make the panel worth opening — what peers are, which
-      // roles exist, and the one key that starts everything.
-      row("");
-      row("  " + fg(t, "accent", "No peers watching yet."));
-      row("");
-      row(fg(t, "dim", "  A peer is a partner agent living in this session: it wakes every few"));
-      row(fg(t, "dim", "  seconds, inspects what the main agent just did, and pushes a finding"));
-      row(fg(t, "dim", "  into the conversation the moment something is wrong. Each peer is a"));
-      row(fg(t, "dim", "  real pi session you can resume in any terminal."));
-      row("");
-      row("  " + fg(t, "accent", "press l to launch one") + fg(t, "dim", "   (or /peer launch <role> <task…>)"));
-      row("");
-      const roles = this.opts.getRoles();
-      if (roles.length > 0) {
-        row(fg(t, "dim", "  available roles:"));
-        for (const r of roles.slice(0, 8)) {
-          row("    " + fg(t, "accent", r.name) + fg(t, "dim", ` — ${truncateToWidth(r.description, Math.max(10, inner - r.name.length - 8))}`));
-          row(fg(t, "dim", `      tick ${Math.round(r.tick / 60)}m · up to ${r.priorityCeiling} · ${r.context} context · ${r.source}`));
-        }
-      }
-      row("");
-    }
-
-    peers.forEach((peer, i) => {
-      const sel = i === this.selected;
-      const open = this.expanded.has(peer.name);
+    // Peer list (capped).
+    const listLines: string[] = [];
+    peers.slice(0, LIST_MAX).forEach((peer, i) => {
+      const isSel = i === this.selected;
       const dot =
-        peer.status === "thinking" ? fg(t, "accent", "●")
-        : peer.status === "error" ? fg(t, "error", "●")
-        : peer.status === "stopped" ? fg(t, "dim", "○")
-        : fg(t, "dim", "●");
+        peer.status === "thinking" ? this.safeFg("accent", "●")
+        : peer.status === "error" ? this.safeFg("error", "●")
+        : this.safeFg("dim", "●");
       const secs = Math.max(0, Math.round((peer.nextTickAt - Date.now()) / 1000));
-      const eta = secs >= 90 ? `${Math.ceil(secs / 60)}m` : `${secs}s`;
-      const tickInfo = peer.busy ? "thinking" : peer.status === "stopped" ? "stopped" : `next ${eta}`;
+      const eta = peer.busy ? "thinking…" : secs >= 90 ? `next ${Math.ceil(secs / 60)}m` : `next ${secs}s`;
       const head =
-        `${sel && this.focused ? fg(t, "accent", "❯") : " "} ${open ? "▾" : "▸"} ${dot} ` +
-        `${sel ? fg(t, "accent", peer.name) : peer.name} ` +
-        fg(t, "dim", `${peer.role.name} · t${peer.tickCount} · ${tickInfo}${peer.findings.length ? ` · ◆${peer.findings.length}` : ""}`);
-      row(truncateToWidth(head, inner));
-
-      if (open) {
-        row(fg(t, "dim", `   ${peer.modelLabel} · id ${shortId(peer.sessionId)} · ${peer.contextMode} · tick ${Math.round(peer.role.tick / 60)}m`));
-        const paneW = inner - 4;
-        const all = this.paneLines(peer, paneW, t);
-        const off = this.scroll.get(peer.name) ?? 0;
-        const end = Math.max(0, all.length - off);
-        const start = Math.max(0, end - this.paneHeight);
-        const view = all.slice(start, end);
-        for (const l of view) row(`   ${fg(t, "dim", "│")}${l}`);
-        if (all.length > this.paneHeight) {
-          const pos = off === 0 ? "tail" : `-${off}`;
-          row(fg(t, "dim", `   └ ${start > 0 ? "↑ " : ""}${all.length} lines · ${pos}${off > 0 ? " · ↓ to follow" : ""}`));
-        }
-        row(fg(t, "dim", truncateToWidth(`   resume: pi --session ${peer.sessionFile}`, inner)));
-      }
+        `${isSel ? this.safeFg("accent", "❯ ") : "  "}${dot} ` +
+        (isSel ? this.safeFg("accent", peer.name) : peer.name) +
+        this.safeFg("dim", `  ${peer.role.name} · t${peer.tickCount} · ${eta}${peer.findings.length ? ` · ◆${peer.findings.length}` : ""}`);
+      listLines.push(truncateToWidth(head, inner));
     });
+    if (peers.length > LIST_MAX) listLines.push(this.safeFg("dim", `  (+${peers.length - LIST_MAX} more — Tab to cycle)`));
 
-    out.push(bar("├" + "─".repeat(inner) + "┤"));
-    const hints = this.focused
-      ? " ↑↓ pick · ⏎ open · l launch · i insert · y/Y yank · r resume · x stop · q close · esc → type in main prompt (panel stays) "
-      : " panel stays open · your typing goes to the main prompt · /peer close · ctrl+alt+p focus panel ";
-    row(fg(t, "dim", truncateToWidth(hints, inner)));
-    out.push(bar("╰" + "─".repeat(inner) + "╯"));
-    return out;
-  }
+    // Fixed geometry: everything except the viewport is chrome; the viewport
+    // absorbs the rest and is padded, so total height NEVER changes between
+    // renders (no drifting with background content).
+    const inputLines = this.inputFrameLines(dialogWidth);
+    const statusLines = 1;
+    const chrome = 1 + listLines.length + 1 + statusLines + 1 + inputLines.length + 1 + 1; // title, list, rule, status, rule, input, hints, bottom
+    const maxRows = Math.max(16, this.opts.getMaxRows());
+    const vh = Math.max(4, maxRows - chrome);
+    this.viewportHeight = vh;
 
-  // ------------------------------------------------------------------- input
-
-  /** SGR wheel: up (btn 64) scrolls BACK (+lines from tail), down (65) toward tail. */
-  private mouseDelta(data: string): number | null {
-    const m = data.match(/\x1b\[<(\d+);\d+;\d+[Mm]/);
-    if (!m) return null;
-    const btn = Number(m[1]);
-    if (btn === 64) return 3;
-    if (btn === 65) return -3;
-    return null;
-  }
-
-  private selectedPeer(): Peer | undefined {
-    return this.opts.getPeers()[this.selected];
-  }
-
-  private scrollBy(delta: number): void {
-    const peer = this.selectedPeer();
-    if (!peer) return;
-    if (!this.expanded.has(peer.name)) this.expanded.add(peer.name);
-    const cur = this.scroll.get(peer.name) ?? 0;
-    const next = Math.max(0, cur + delta);
-    this.scroll.set(peer.name, next);
-  }
-
-  /** External selection (peer_panel tool): select + expand a peer by name. */
-  selectPeer(name: string): boolean {
-    const idx = this.opts.getPeers().findIndex((p) => p.name === name);
-    if (idx === -1) return false;
-    this.selected = idx;
-    this.expanded.add(name);
-    this.opts.requestRender();
-    return true;
-  }
-
-  handleInput(data: string): boolean {
-    const peers = this.opts.getPeers();
-    const peer = this.selectedPeer();
-    const wheel = this.mouseDelta(data);
-    if (wheel !== null) {
-      this.scrollBy(wheel);
-      this.opts.requestRender();
-      return true;
+    const paneW = inner - 1;
+    const raw = sel ? this.paneLines(sel, paneW) : this.emptyStateLines(inner);
+    const wrapped: string[] = [];
+    for (const l of raw) {
+      if (!l) wrapped.push("");
+      else wrapped.push(...wrapTextWithAnsi(l, paneW));
     }
-    if (matchesKey(data, Key.up)) {
-      this.selected = Math.max(0, this.selected - 1);
-    } else if (matchesKey(data, Key.down)) {
-      this.selected = Math.min(Math.max(0, peers.length - 1), this.selected + 1);
-    } else if (matchesKey(data, Key.enter) || data === " ") {
-      if (peer) {
-        if (this.expanded.has(peer.name)) this.expanded.delete(peer.name);
-        else this.expanded.add(peer.name);
-      }
-    } else if (matchesKey(data, Key.pageUp)) {
-      this.scrollBy(this.paneHeight - 2);
-    } else if (matchesKey(data, Key.pageDown)) {
-      this.scrollBy(-(this.paneHeight - 2));
-    } else if (data === "i") {
-      const f = peer?.findings[peer.findings.length - 1];
-      if (f && peer) this.opts.insertText(`Peer ${peer.name} (${peer.role.name}) found [tick ${f.tick}]: ${f.body}`);
-    } else if (data === "y") {
-      const f = peer?.findings[peer.findings.length - 1];
-      if (f) this.opts.yankText(f.body, "finding");
-    } else if (data === "Y") {
-      if (peer) {
-        const text = peer.pane.map((p) => p.text).join("\n");
-        this.opts.yankText(text, `${peer.name} pane`);
-      }
-    } else if (data === "r") {
-      if (peer) this.opts.yankText(`pi --session ${peer.sessionFile}`, "resume command");
-    } else if (data === "l") {
-      this.opts.onLaunch();
-    } else if (data === "x") {
-      if (peer) this.opts.onStop(peer.name);
-    } else if (data === "q") {
-      this.opts.onClose();
-      return true;
-    } else if (matchesKey(data, Key.escape)) {
-      this.opts.onUnfocus();
-      return true;
-    } else {
-      return false;
+    const maxScroll = Math.max(0, wrapped.length - vh);
+    if (this.follow) this.scrollOffset = maxScroll;
+    else {
+      this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
+      if (this.scrollOffset >= maxScroll) this.follow = true;
     }
-    this.opts.requestRender();
-    return true;
+    const visible = wrapped.slice(this.scrollOffset, this.scrollOffset + vh);
+    const padCount = Math.max(0, vh - visible.length);
+
+    const lines: string[] = [this.titleLine(inner)];
+    for (const l of listLines) lines.push(this.frameLine(l, inner));
+    if (listLines.length === 0) lines.push(this.frameLine(this.safeFg("dim", " (no peers — see below)"), inner));
+    lines.push(this.ruleLine(inner));
+    for (const l of visible) lines.push(this.frameLine(l ? ` ${l}` : "", inner));
+    for (let i = 0; i < padCount; i++) lines.push(this.frameLine("", inner));
+    lines.push(this.ruleLine(inner));
+
+    const hiddenAbove = this.scrollOffset;
+    const hiddenBelow = Math.max(0, maxScroll - this.scrollOffset);
+    const scrollInfo = hiddenAbove || hiddenBelow ? ` · ↑${hiddenAbove} ↓${hiddenBelow}` : "";
+    const status = this.flash
+      ? this.safeFg("warning", ` ${this.flash}`)
+      : sel
+        ? this.safeFg("dim", truncateToWidth(` ${sel.modelLabel} · id ${shortId(sel.sessionId)} · ${sel.contextMode} · tick ${Math.round(sel.role.tick / 60)}m · ${sel.status}${scrollInfo} · task: ${sel.task}`, inner))
+        : this.safeFg("dim", " launch a peer to begin");
+    lines.push(this.frameLine(status, inner));
+    lines.push(...inputLines);
+
+    const hints = this._focused
+      ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc → main prompt (panel stays) "
+      : " panel stays open · typing goes to the main prompt · /peer close · ctrl+alt+p focus panel ";
+    lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
+    lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
+    return lines;
   }
 }
