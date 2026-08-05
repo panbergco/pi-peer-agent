@@ -252,7 +252,41 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   // ------------------------------------------------------------- commands
 
   pi.registerCommand("peers", {
-    description: "peers: (bare = toggle sidecar) | launch <role> <task> | stop <name|all> | retask <name> <task> | broadcast <text> | list",
+    description: "peers: (bare = toggle sidecar) | launch <role> <task> | talk <name> <text> | stop <name|all> | kill <name> | retask <name> <task> | broadcast <text> | list",
+    // Main-editor argument autocomplete — verbs, then roles/callsigns per verb
+    // (same UX as pi's own commands; the panel input has its own provider).
+    getArgumentCompletions: (prefix: string) => {
+      const words = prefix.split(/\s+/);
+      const verb = words[0] ?? "";
+      const VERBS: Array<[string, string]> = [
+        ["launch", "<role> <task…> [--tick <min>] [--fork|--compacted|--fresh]"],
+        ["talk", "<name> <message…> — converse; reply lands in the panel"],
+        ["retask", "<name> <task…> — give a peer a new standing task"],
+        ["broadcast", "<text…> — instruct every active peer"],
+        ["stop", "<name|all> — end the watch (session kept, resumable)"],
+        ["kill", "<name> — end the watch AND delete the session"],
+        ["list", "crew + available roles"],
+      ];
+      if (words.length <= 1) {
+        const hits = VERBS.filter(([v]) => v.startsWith(verb));
+        return hits.length > 0 ? hits.map(([v, d]) => ({ value: v, label: v, description: d })) : null;
+      }
+      const argPrefix = words[1] ?? "";
+      const cwd = lastCtx?.cwd ?? process.cwd();
+      if (verb === "launch" && words.length === 2) {
+        const roles = discoverRoles(cwd).filter((r) => r.name.startsWith(argPrefix));
+        return roles.length > 0
+          ? roles.map((r) => ({ value: `launch ${r.name}`, label: r.name, description: `${r.description} · tick ${Math.round(r.tick / 60)}m` }))
+          : null;
+      }
+      if ((verb === "talk" || verb === "retask" || verb === "stop" || verb === "kill") && words.length === 2) {
+        const names = manager.active.map((p) => ({ name: p.name, desc: `${p.role.name} · ${p.status}` }));
+        if (verb === "stop") names.push({ name: "all", desc: "every active peer" });
+        const hits = names.filter((n) => n.name.startsWith(argPrefix));
+        return hits.length > 0 ? hits.map((n) => ({ value: `${verb} ${n.name}`, label: n.name, description: n.desc })) : null;
+      }
+      return null;
+    },
     handler: async (args: unknown, ctx: ExtensionContext) => {
       track(ctx);
       const ui: any = ctx.ui;
