@@ -226,9 +226,19 @@ export class PeerSidecar extends Container implements Focusable {
     return data === "\x1b\x10" || data === "\x1b[112;7u" || data === "\x1b[80;7u";
   }
 
+  /** ctrl+alt+o — focus toggle chord (legacy ESC+ctrl-o and CSI-u). */
+  private isFocusChord(data: string): boolean {
+    return data === "\x1b\x0f" || data === "\x1b[111;7u" || data === "\x1b[79;7u";
+  }
+
   handleInput(data: string): void {
     if (this.isToggleChord(data)) {
       this.opts.onClose();
+      return;
+    }
+    if (this.isFocusChord(data)) {
+      // Panel receives input only when focused → hand keys back to main.
+      this.opts.onUnfocus();
       return;
     }
     const wheel = this.mouseDelta(data);
@@ -459,8 +469,8 @@ export class PeerSidecar extends Container implements Focusable {
     lines.push(...inputLines);
 
     const hints = this._focused
-      ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc → main prompt (panel stays) "
-      : " panel stays open · typing goes to the main prompt · /peers close · ctrl+alt+p focus panel ";
+      ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc or ctrl+alt+o → main prompt (panel stays) "
+      : " typing goes to the MAIN prompt · ctrl+alt+o focus panel · ctrl+alt+p hide ";
     lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
     lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
     return lines;

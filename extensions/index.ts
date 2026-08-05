@@ -328,6 +328,25 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerShortcut(config.focusKey as any, {
+    description: "peers panel: move keyboard between panel and main prompt",
+    handler: (ctx: ExtensionContext) => {
+      track(ctx);
+      if (!ctx.hasUI) return;
+      if (!sidecar) {
+        void openSidecar(ctx); // opening focuses — sensible for a focus key
+        return;
+      }
+      // Unfocused → focus. (Focused → the panel itself handles the chord
+      // and unfocuses — the editor would swallow it before this handler.)
+      if (sidecar.handle && !sidecar.handle.isFocused?.()) {
+        sidecar.handle.focus();
+        sidecar.component.focused = true;
+        (lastCtx ?? ctx).ui?.notify?.("keys → peers panel", "info");
+      }
+    },
+  });
+
   // ---------------------------------------------------------------- tools
 
   pi.registerTool({

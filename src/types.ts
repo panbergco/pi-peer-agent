@@ -52,6 +52,8 @@ export interface Finding {
 
 export interface PeerConfig {
   toggleKey: string;
+  /** Focus toggle: move the keyboard between panel and main prompt. */
+  focusKey: string;
   maxPeers: number;
   /** Overlay geometry — btw-style responsive centered modal (ratio of terminal, clamped). */
   overlayWidthRatio: number;
@@ -67,6 +69,7 @@ export interface PeerConfig {
 
 export const DEFAULT_CONFIG: PeerConfig = {
   toggleKey: "ctrl+alt+p",
+  focusKey: "ctrl+alt+o",
   maxPeers: 6,
   overlayWidthRatio: 0.7,
   overlayHeightRatio: 0.7,
