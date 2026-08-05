@@ -410,3 +410,29 @@ enhancements to peer-agent itself:
 - Interrupt-priority roles and their authorization ceremony (MACP §9 grants; the orchestrator
   operator-directive pattern is the likely shape).
 - Cost telemetry per peer (tokens/tick) surfaced in `pi-peer status` — P1 stretch.
+
+## 16. Agent taxonomy — tick-bound and objective-bound (operator directive 2026-08-05)
+
+Two fundamental agent types, one visible surface. Everything launched through this
+extension is OBSERVABLE — panel, roster, ledger, receipts — never a hidden background
+worker.
+
+- **Type 1 — tick-bound (watch).** The current peer: a standing objective, framework-
+  issued interval ticks, QUIET/FINDING verdicts, never self-terminating. For concerns
+  that persist ("watch for drift").
+- **Type 2 — objective-bound (mission).** An agent launched against a COMPLETION
+  CONDITION: it works in bounded work cycles until a mechanically checkable goal
+  predicate is met (file exists, command exits 0, question answered, condition
+  attested), then reports DONE with evidence and retires to its resumable session.
+  The completion condition is declared at launch, evaluated by the FRAMEWORK (not
+  self-asserted), with a cycle cap and receipts. For work that ends ("summarize this
+  and stop", "wait until the build is green, then alert").
+- **Type 3 — reserved.** The mode field is an open enum; a third mode (e.g. event-
+  bound: woken by external triggers rather than intervals or objectives) is
+  provisioned for but deliberately not designed yet.
+
+Shared invariants across types: same launch surfaces, same session-file identity and
+recovery, same delivery/receipt contract, same read-only wall for watchers (an
+objective-bound agent MAY be granted bounded write scopes in a future integration —
+gated, never default). Sub-agent launches route through this surface so the operator
+sees every agent that exists: the anti-hidden-team principle.
