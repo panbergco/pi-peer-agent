@@ -655,6 +655,38 @@ export class PeerManager {
     }
   }
 
+  /** Deliver a finding that arrived via the FILE INBOX (spec §9 transport 2):
+   *  written by a peer resumed standalone in another terminal. Same MACP
+   *  mapping as live findings, attributed with '(standalone)'. */
+  deliverInboxFinding(msg: { peer?: string; priority?: string; body?: string }): boolean {
+    const cwd = this.ctx?.cwd ?? process.cwd();
+    const body = String(msg.body ?? "").trim();
+    if (!body) return false;
+    const peerName = String(msg.peer ?? "unknown-peer");
+    const pr: Priority = msg.priority === "interrupt" ? "steering" : (msg.priority as Priority) ?? "info"; // interrupt via file demoted — no live session to justify an abort
+    const parentId = this.parentSessionId();
+    const header = `[peer-agent] finding from agent://pi/${parentId}/${peerName} (standalone, ${pr})`;
+    const content = `${header}\n\n${body}`;
+    try {
+      if (pr === "steering") {
+        this.pi.sendMessage({ customType: "peer-finding", content, display: true }, { deliverAs: "steer", triggerTurn: true });
+      } else {
+        this.pi.sendMessage({ customType: "peer-finding", content, display: true }, { deliverAs: "nextTurn" });
+      }
+      appendEvent(cwd, "inbox.delivered", { peer: peerName, priority: pr, chars: body.length });
+      // Surface in the panel too if that peer happens to be active/known.
+      const live = this.peers.get(peerName);
+      if (live) {
+        live.pane.push({ kind: "finding", text: `(standalone) ${body}`, priority: pr });
+        this.notify();
+      }
+      return true;
+    } catch (err) {
+      appendEvent(cwd, "inbox.failed", { peer: peerName, error: String(err).slice(0, 200) });
+      return false;
+    }
+  }
+
   /** Direct conversation with a peer — outside the tick, no verdict, no
    *  delivery. The exchange is recorded in the peer's real session file and
    *  the peer's reply is RETURNED, so the main agent can consult its helpers

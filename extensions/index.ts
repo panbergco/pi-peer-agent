@@ -7,6 +7,8 @@
  * child processes.
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { discoverRoles, parseTick } from "../src/roles.js";
@@ -563,8 +565,72 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   // ---------------------------------------------------------------- events
 
+  /** True when the CURRENT session is itself a peer's session (resumed
+   *  standalone via `pi --session <peer file>`). */
+  function standalonePeerEntry(ctx: ExtensionContext): any | null {
+    try {
+      const sid = (ctx as any).sessionManager?.getSessionId?.();
+      if (!sid) return null;
+      return readRoster(ctx.cwd).find((e) => e.peerSessionId === sid) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  let inboxTimer: ReturnType<typeof setInterval> | null = null;
+  let peerMode: any = null; // roster entry when this session IS a peer
+
+  function inboxDir(cwd: string): string {
+    return path.join(cwd, ".pi", "peer-agent", "inbox");
+  }
+
+  function startInboxWatcher(ctx: ExtensionContext): void {
+    if (inboxTimer) return;
+    const dir = inboxDir(ctx.cwd);
+    const processed = path.join(dir, "processed");
+    inboxTimer = setInterval(() => {
+      try {
+        if (!fs.existsSync(dir)) return;
+        const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+        if (files.length === 0) return;
+        fs.mkdirSync(processed, { recursive: true });
+        for (const f of files.slice(0, 10)) {
+          const p = path.join(dir, f);
+          try {
+            const msg = JSON.parse(fs.readFileSync(p, "utf8"));
+            manager.deliverInboxFinding(msg);
+          } catch {
+            /* malformed file — archive it anyway so it can't loop */
+          }
+          fs.renameSync(p, path.join(processed, f));
+        }
+      } catch {
+        /* watcher must never break the session */
+      }
+    }, 5000);
+  }
+
   pi.on("session_start", async (_e: unknown, ctx: ExtensionContext) => {
     track(ctx);
+    // Am I a peer resumed standalone? Then teach reporting-home, and skip
+    // the main-session machinery (a peer must not recover peers).
+    peerMode = standalonePeerEntry(ctx);
+    if (peerMode) {
+      pi.sendMessage(
+        {
+          customType: "peer-standalone-brief",
+          content:
+            `You are ${peerMode.name} (${peerMode.role}), a peer of main session ${peerMode.parentSessionId}, resumed STANDALONE in a separate terminal. ` +
+            `Your standing task: ${peerMode.task}. You may converse freely here. To push a finding to the main session, write a JSON file to ` +
+            `.pi/peer-agent/inbox/<unique-name>.json with fields {"peer": "${peerMode.name}", "priority": "info"|"steering", "body": "<one self-contained paragraph>"}. ` +
+            `It is delivered to the main agent within seconds, attributed to you. Do not modify anything else in the repository.`,
+          display: true,
+        },
+        { deliverAs: "nextTurn" },
+      );
+      return;
+    }
+    startInboxWatcher(ctx);
     // Recover this session's suspended crew (restart/resume/reload) — peers
     // are part of the session and come back with it, memory intact.
     try {
@@ -585,6 +651,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       /* already gone */
     }
     sidecar = null;
+    if (inboxTimer) {
+      clearInterval(inboxTimer);
+      inboxTimer = null;
+    }
+    if (peerMode) return; // a standalone peer owns no crew
     // Suspend, don't stop: the crew is part of the session and recovers
     // with it (roster.json keeps them as 'suspended').
     await manager.suspendAll();
