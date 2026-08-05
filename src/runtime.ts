@@ -91,7 +91,11 @@ FINDING[info|steering|interrupt]: <one self-contained, actionable paragraph>
 QUIET means: nothing worth the main agent's attention. Findings interrupt a working agent — they must earn it.
 Your watch is STANDING: you are a long-running peer, not a one-off task. Never announce completion,
 never stop yourself, never wind down — "the work seems finished" is itself just QUIET. Only the
-operator or the main agent ends your watch.`;
+operator or the main agent ends your watch.
+DIRECT MESSAGES: replies stay private between you and the sender UNLESS you end the reply with a
+FINDING[...] line — that is your ONLY way to push something to the main agent on demand (e.g. when
+asked to relay or alert). You have no other relay mechanism; never claim to have delivered anything
+without emitting that line.`;
 
 export class PeerManager {
   peers = new Map<string, Peer>();
@@ -625,7 +629,7 @@ export class PeerManager {
     return `agent://pi/${this.parentSessionId()}`;
   }
 
-  private handleVerdict(peer: Peer, text: string, cwd: string): void {
+  private handleVerdict(peer: Peer, text: string, cwd: string, ceilingOverride?: Priority): void {
     const m = this.parseVerdict(text);
     if (!m) {
       peer.quietStreak++;
@@ -639,9 +643,10 @@ export class PeerManager {
       peer.backoffIdx = Math.min(peer.backoffIdx + 1, this.config.backoff.length - 1);
       return;
     }
+    const ceiling = ceilingOverride ?? peer.role.priorityCeiling;
     const requested = (m[2] ?? "info") as Priority;
-    const clamped = priorityRank(requested) > priorityRank(peer.role.priorityCeiling);
-    const priority: Priority = clamped ? peer.role.priorityCeiling : requested;
+    const clamped = priorityRank(requested) > priorityRank(ceiling);
+    const priority: Priority = clamped ? ceiling : requested;
     const body = (m[3] ?? "").trim().slice(0, 4000);
     if (!body) return;
 
@@ -736,6 +741,16 @@ export class PeerManager {
         }
       }
       appendEvent(this.ctx?.cwd ?? process.cwd(), "talk.replied", { peer: name, from, chars: reply.length });
+      // A FINDING line in a talk reply is a real push: deliver it to the main
+      // agent like a tick finding (this is the peer's on-demand relay channel).
+      // Operator authority outranks the role ceiling for these: a human-
+      // requested relay may deliver at up to steering even from an info-
+      // ceiling role (interrupt stays tick-only).
+      const v = this.parseVerdict(reply);
+      if (v && !v[1]!.trim().startsWith("QUIET")) {
+        const override: Priority | undefined = from === "operator" ? ("steering" as Priority) : undefined;
+        this.handleVerdict(peer, reply, this.ctx?.cwd ?? process.cwd(), override);
+      }
     } catch (err) {
       peer.pane.push({ kind: "note", text: `error: ${String(err).slice(0, 120)}` });
       reply = `(peer errored: ${String(err).slice(0, 120)})`;
