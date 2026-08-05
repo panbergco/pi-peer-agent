@@ -67,7 +67,7 @@ reach you.
   with memory — do not relaunch after a restart, check `peer_roster` first.
 - Each peer is a real pi session, resumable standalone (`pi --session <file>`); a
   standalone peer reports back via `.pi/peer-agent/inbox/*.json`.
-- Shell CLI exists for scripts/automation: `pi-peer list|findings|launch|talk|retask|tick|model|stop`
+- Shell CLI exists for scripts/automation: `pi-peer list|findings|launch|talk|retask|tick|model|stop|kill`
   (`--cwd <project>`); write-commands queue in `.pi/peer-agent/control/` and are
   applied by the live session within ~5s — queued commands survive restarts.
 - State/receipts: `.pi/peer-agent/roster.json` (crew map) and `events.jsonl` (ledger:

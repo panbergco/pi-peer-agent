@@ -70,7 +70,7 @@ Slash commands autocomplete exactly like pi's own:
 - `/model [query]` — switch the selected peer's model live; the list mirrors **pi's
   scoped models** (same set as Ctrl+P)
 - `/tick <minutes>` — change the selected peer's interval live
-- `/stop [name]` · `/retask <task…>` · `/insert` (finding → your prompt) ·
+- `/stop [name]` (session kept) · `/kill [name]` (session deleted) · `/retask <task…>` · `/insert` (finding → your prompt) ·
   `/yank` · `/resume` (copy resume command) · `/close` · `/help`
 
 ### The main agent controls peers too (full parity)
@@ -101,7 +101,8 @@ pi-peer talk observer-1 "what happened while I was away?"   # prints the reply
 pi-peer retask observer-1 "new focus" --tick 9
 pi-peer tick observer-1 7
 pi-peer model observer-1 glm-5-2
-pi-peer stop observer-1                       # or: stop all
+pi-peer stop observer-1                       # or: stop all (session kept)
+pi-peer kill observer-1                       # end watch AND delete the session
 pi-peer --cwd /path/to/project list           # target another project
 ```
 

@@ -115,7 +115,8 @@ usage: pi-peer [--cwd <dir>] <command>
   retask <name> <task…> [--tick <min>]
   tick <name> <minutes>                    change a peer's interval
   model <name> <provider/model|substring>  switch a peer's model
-  stop <name|all>
+  stop <name|all>                           end the watch (session kept, resumable)
+  kill <name>                              end the watch AND delete the peer's session
 
 Write commands need a live pi session in the project (applied within ~5s).`;
 
@@ -185,6 +186,11 @@ async function main() {
       const ref = argv.join(" ").trim();
       if (!ref) fail("model needs a model ref (provider/id or substring)");
       await run({ action: "model", name, ref });
+      return;
+    }
+    case "kill": {
+      const name = argv.shift() ?? fail("kill needs a peer name");
+      await run({ action: "kill", name });
       return;
     }
     case "stop": {

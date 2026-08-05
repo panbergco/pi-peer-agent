@@ -124,6 +124,9 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             onStop: (name: string) => {
               void manager.stop(name).then(() => tui.requestRender());
             },
+            onKill: (name: string) => {
+              void manager.kill(name).then(() => tui.requestRender());
+            },
             onLaunch: () => {
               sidecar?.handle?.unfocus?.();
               if (sidecar) sidecar.component.focused = false;
@@ -266,7 +269,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const lines = [
           `roles: ${roles.map((r) => `${r.name} (${r.source}, tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling})`).join(" · ") || "none found"}`,
           `active: ${manager.active.map((p) => `${p.name}[t${p.tickCount}${p.findings.length ? ` ◆${p.findings.length}` : ""}]`).join(" · ") || "none"}`,
-          `usage: /peers (toggle panel) · /peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peers talk <name> <text…> · /peers stop <name|all> · /peers retask <name> <task…> · /peers broadcast <text…>`,
+          `usage: /peers (toggle panel) · /peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peers talk <name> <text…> · /peers stop <name|all> · /peers kill <name> · /peers retask <name> <task…> · /peers broadcast <text…>`,
         ];
         ui?.notify?.(lines.join("\n"), "info");
         return;
@@ -332,6 +335,13 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         if (res.status === "missing") ui?.notify?.(`no active peer named "${name}"`, "error");
         else if (res.status === "busy") ui?.notify?.(`${name} is mid-tick — try again in a moment`, "warning");
         else if (!sidecar) toggleSidecar(ctx); // the reply streams in the panel
+        return;
+      }
+
+      if (verb === "kill") {
+        const name = rest[0] ?? "";
+        const ok = await manager.kill(name);
+        ui?.notify?.(ok ? `${name} killed — watch ended, session deleted` : `no peer named "${name}"`, ok ? "info" : "error");
         return;
       }
 
@@ -658,6 +668,10 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       case "model": {
         const res = await manager.setPeerModel(String(cmd.name), String(cmd.ref));
         return { ok: res.ok, message: res.message };
+      }
+      case "kill": {
+        const ok = await manager.kill(String(cmd.name));
+        return ok ? { ok: true, message: `${cmd.name} killed — session deleted` } : { ok: false, message: `no peer ${cmd.name}` };
       }
       case "stop": {
         if (cmd.name === "all") {

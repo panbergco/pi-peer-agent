@@ -886,6 +886,26 @@ export class PeerManager {
     return true;
   }
 
+  /** Kill: stop AND erase — roster entry removed, session file deleted.
+   *  The irreversible sibling of stop (which keeps the session resumable). */
+  async kill(name: string): Promise<boolean> {
+    const peer = this.peers.get(name);
+    if (!peer) return false;
+    if (peer.status !== "stopped") await this.stop(name);
+    this.peers.delete(name);
+    const cwd = this.ctx?.cwd ?? process.cwd();
+    try {
+      const { unlinkSync, existsSync } = await import("node:fs");
+      if (peer.sessionFile && existsSync(peer.sessionFile)) unlinkSync(peer.sessionFile);
+    } catch {
+      /* file removal is best-effort */
+    }
+    appendEvent(cwd, "peer.killed", { peer: name, sessionFile: peer.sessionFile });
+    this.refreshRoster(cwd);
+    this.notify();
+    return true;
+  }
+
   async stopAll(): Promise<void> {
     for (const p of [...this.peers.values()]) if (p.status !== "stopped") await this.stop(p.name);
   }

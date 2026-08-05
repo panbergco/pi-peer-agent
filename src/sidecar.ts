@@ -48,6 +48,8 @@ export interface SidecarOptions {
   onClose: () => void;
   onUnfocus: () => void;
   onStop: (name: string) => void;
+  /** Kill: stop + delete the peer's session (irreversible). */
+  onKill: (name: string) => void;
   /** Interactive launch via dialogs (no-args /launch). */
   onLaunch: () => void;
   /** Direct launch from panel input: /launch <role> <task…>. */
@@ -134,7 +136,8 @@ export class PeerSidecar extends Container implements Focusable {
             .map((m) => ({ value: m, label: m }));
         },
       },
-      { name: "stop", description: "stop a peer (session retained)", argumentHint: "[name]", getArgumentCompletions: peerItems },
+      { name: "stop", description: "stop a peer (session retained, resumable)", argumentHint: "[name]", getArgumentCompletions: peerItems },
+      { name: "kill", description: "stop AND delete the peer's session (irreversible)", argumentHint: "[name]", getArgumentCompletions: peerItems },
       { name: "tick", description: "change the selected peer's tick interval", argumentHint: "<minutes>" },
       { name: "retask", description: "give the selected peer a new standing task", argumentHint: "<task…>" },
       { name: "insert", description: "insert the latest finding into the main prompt" },
@@ -219,7 +222,7 @@ export class PeerSidecar extends Container implements Focusable {
     }
     switch ((verb ?? "").toLowerCase()) {
       case "help":
-        this.setFlash("/launch [role task…] · /model [query] · /tick <min> · /stop [name] · /retask <task…> · /insert · /yank · /resume · /close");
+        this.setFlash("/launch [role task…] · /model [query] · /tick <min> · /stop [name] · /kill [name] · /retask <task…> · /insert · /yank · /resume · /close");
         return;
       case "model":
         if (peer) this.opts.onModel(peer.name, rest.join(" "));
@@ -239,6 +242,14 @@ export class PeerSidecar extends Container implements Focusable {
         const name = rest[0] ?? peer?.name;
         if (name) this.opts.onStop(name);
         else this.setFlash("no peer to stop");
+        return;
+      }
+      case "kill": {
+        const name = rest[0] ?? peer?.name;
+        if (name) {
+          this.opts.onKill(name);
+          this.setFlash(`${name} killed — watch ended, session deleted`);
+        } else this.setFlash("no peer to kill");
         return;
       }
       case "retask":
