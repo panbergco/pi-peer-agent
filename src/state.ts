@@ -21,10 +21,39 @@ export function ensureStateDirs(cwd: string): void {
 
 let seq = 0;
 
+/** An event record as written to the ledger (and handed to any sink). */
+export interface PeerEvent {
+  seq: number;
+  ts: string;
+  kind: string;
+  [key: string]: unknown;
+}
+export type EventSink = (event: PeerEvent, cwd: string) => void;
+
+let sink: EventSink | null = null;
+
+/** Install an additional in-process consumer for every peer event (E3).
+ *  The JSONL ledger is unaffected — a sink is a fan-out, never a replacement,
+ *  so an integrated host's store and the local file always agree. */
+export function setEventSink(fn: EventSink | null): void {
+  sink = fn;
+}
+export function resetEventSink(): void {
+  sink = null;
+}
+
 export function appendEvent(cwd: string, kind: string, payload: Record<string, unknown>): void {
+  const event: PeerEvent = { seq: ++seq, ts: new Date().toISOString(), kind, ...payload };
+  if (sink) {
+    try {
+      sink(event, cwd);
+    } catch {
+      // A misbehaving sink must never cost us the ledger line or the session.
+    }
+  }
   try {
     ensureStateDirs(cwd);
-    const line = JSON.stringify({ seq: ++seq, ts: new Date().toISOString(), kind, ...payload });
+    const line = JSON.stringify(event);
     appendFileSync(join(stateDir(cwd), "events.jsonl"), line + "\n", "utf8");
   } catch {
     // The ledger must never take the session down.

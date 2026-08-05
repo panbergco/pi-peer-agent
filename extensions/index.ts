@@ -14,7 +14,7 @@ import { Type } from "typebox";
 import { discoverRoles, parseTick } from "../src/roles.js";
 import { PeerManager } from "../src/runtime.js";
 import { PeerSidecar } from "../src/sidecar.js";
-import { appendEvent, loadConfig, readRoster } from "../src/state.js";
+import { appendEvent, loadConfig, readRoster, resetEventSink, setEventSink, type PeerEvent } from "../src/state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -255,6 +255,15 @@ export default function piPeerAgent(pi: ExtensionAPI) {
   }
 
   // ------------------------------------------------------------- commands
+
+  // E3: hosts (e.g. an external orchestrator, or a proof producer) attach an
+  // in-process consumer for every peer event. Fan-out only — the JSONL ledger
+  // is always still written, so file and store can never disagree.
+  (globalThis as any).piPeerAgent = {
+    setEventSink: (fn: ((e: PeerEvent, cwd: string) => void) | null) => setEventSink(fn),
+    resetEventSink: () => resetEventSink(),
+    version: 1,
+  };
 
   pi.registerCommand("peers", {
     description: "peers: (bare = toggle sidecar) | launch <role> <task> | talk <name> <text> | stop <name|all> | kill <name> | retask <name> <task> | broadcast <text> | list",
