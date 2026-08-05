@@ -273,11 +273,13 @@ export class PeerSidecar extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, Key.escape)) {
+      // Esc clears a draft first; on an empty input it CLOSES the panel
+      // (operator ruling). Handing keys to main without closing is ctrl+alt+o.
       if (this.input.getText().length > 0) {
         this.input.setText("");
         this.opts.requestRender();
       } else {
-        this.opts.onUnfocus();
+        this.opts.onClose();
       }
       return;
     }
@@ -469,7 +471,7 @@ export class PeerSidecar extends Container implements Focusable {
     lines.push(...inputLines);
 
     const hints = this._focused
-      ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc or ctrl+alt+o → main prompt (panel stays) "
+      ? " type = talk to selected peer · /help commands · Tab switch · ↑↓/wheel scroll · esc close · ctrl+alt+o → main prompt (panel stays) "
       : " typing goes to the MAIN prompt · ctrl+alt+o focus panel · ctrl+alt+p hide ";
     lines.push(this.frameLine(this.safeFg("dim", truncateToWidth(hints, inner)), inner));
     lines.push(this.purple(`╰${"─".repeat(inner)}╯`));
