@@ -219,7 +219,18 @@ export class PeerSidecar extends Container implements Focusable {
     this.opts.requestRender();
   }
 
+  /** ctrl+alt+p in legacy (ESC+ctrl-p) or CSI-u encoding. The focused
+   *  panel's editor would otherwise swallow the chord, making the global
+   *  shortcut unable to close what it opened (btw guards identically). */
+  private isToggleChord(data: string): boolean {
+    return data === "\x1b\x10" || data === "\x1b[112;7u" || data === "\x1b[80;7u";
+  }
+
   handleInput(data: string): void {
+    if (this.isToggleChord(data)) {
+      this.opts.onClose();
+      return;
+    }
     const wheel = this.mouseDelta(data);
     if (wheel !== null) {
       this.scrollBy(wheel);
