@@ -65,6 +65,9 @@ export interface SidecarOptions {
   getModels: () => string[];
   /** Change the selected peer's tick interval (minutes). */
   onTick: (name: string, minutes: number) => void;
+  /** Agents in this project owned by ANOTHER session (durable state) — shown
+   *  read-only so the panel is a complete census, never a partial view. */
+  getForeignAgents?: () => Array<{ name: string; role: string; status: string; mode?: string }>;
   onRetask: (name: string, task: string) => void;
   insertText: (text: string) => void;
   yankText: (text: string, label: string) => void;
@@ -406,7 +409,8 @@ export class PeerSidecar extends Container implements Focusable {
     const peers = this.opts.getPeers();
     const sel = this.selectedPeer();
     const focus = this._focused ? " ⌨ typing captured here ·" : "";
-    const title = ` PEERS · ${peers.length} watching${sel ? ` · ${sel.name}` : ""}${focus} `;
+    const foreign = this.opts.getForeignAgents?.() ?? [];
+    const title = ` PEERS · ${peers.length} watching${foreign.length ? ` + ${foreign.length} elsewhere` : ""}${sel ? ` · ${sel.name}` : ""}${focus} `;
     const text = truncateToWidth(title, Math.max(1, inner - 2), "…");
     const right = Math.max(0, inner - 2 - visibleWidth(text));
     return `${this.purple("╭──")}${this.safeFg(this._focused ? "accent" : "dim", text)}${this.purple(`${"─".repeat(right)}╮`)}`;
@@ -508,6 +512,14 @@ export class PeerSidecar extends Container implements Focusable {
         this.safeFg("dim", `  ${peer.role.name} · t${peer.tickCount} · ${eta}${peer.findings.length ? ` · ◆${peer.findings.length}` : ""}`);
       listLines.push(truncateToWidth(head, inner));
     });
+    for (const f of (this.opts.getForeignAgents?.() ?? []).slice(0, LIST_MAX)) {
+      listLines.push(
+        truncateToWidth(
+          `  ${this.safeFg("dim", "○")} ${this.safeFg("dim", f.name)}${this.safeFg("dim", `  ${f.role} · ${f.status} · ${f.mode ?? "watch"} · other session (read-only)`)}`,
+          inner,
+        ),
+      );
+    }
     if (peers.length > LIST_MAX) listLines.push(this.safeFg("dim", `  (+${peers.length - LIST_MAX} more — Tab to cycle)`));
 
     // Fixed geometry: everything except the viewport is chrome; the viewport

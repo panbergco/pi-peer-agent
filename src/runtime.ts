@@ -5,7 +5,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentMode, ContextMode, Finding, Objective, PaneEntry, PeerConfig, PeerRole, PeerStatus, Priority, RosterEntry } from "./types.js";
 import { objectiveMet, priorityRank, shortId, uid } from "./types.js";
-import { appendEvent, upsertAgentsBlock, writeRoster } from "./state.js";
+import { appendEvent, readRoster, upsertAgentsBlock, writeRoster } from "./state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -139,8 +139,15 @@ export class PeerManager {
     this.ctx = ctx;
   }
 
+  /** Agents still on watch/mission (panel + tick views). Ended agents remain
+   *  in the roster/census but are no longer "active". */
   get active(): Peer[] {
-    return [...this.peers.values()].filter((p) => p.status !== "stopped");
+    return [...this.peers.values()].filter((p) => !["stopped", "done", "exhausted"].includes(p.status));
+  }
+
+  /** Everything this session knows about, ended included (census). */
+  get all(): Peer[] {
+    return [...this.peers.values()];
   }
 
   private renderPending = false;
@@ -244,7 +251,7 @@ export class PeerManager {
       ...(p.objective ? { objective: p.objective } : {}),
       ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
-    writeRoster(cwd, entries);
+    this.mergeRoster(cwd, entries);
   }
 
   /** Where peer session files live: <default sessions dir>/peer-agent/. */
@@ -373,7 +380,8 @@ export class PeerManager {
    *  — peers are part of the session and come back on recover(). */
   async suspendAll(): Promise<void> {
     const cwd = this.ctx?.cwd ?? process.cwd();
-    const entries: RosterEntry[] = this.active.map((p) => ({
+    // Every agent on record — including ended missions — stays in the census.
+    const entries: RosterEntry[] = [...this.peers.values()].map((p) => ({
       name: p.name,
       role: p.role.name,
       address: p.address,
@@ -384,7 +392,9 @@ export class PeerManager {
       contextMode: p.contextMode,
       model: p.modelLabel,
       tickBaseS: p.role.tick,
-      status: "suspended" as PeerStatus,
+      // A finished mission stays finished: only agents that were still
+      // working are 'suspended' (they resume; done/exhausted do not).
+      status: (p.status === "done" || p.status === "exhausted" ? p.status : "suspended") as PeerStatus,
       startedAt: p.startedAt,
       usage: { input: p.usage.input, output: p.usage.output, costUsd: Number(p.usage.costUsd.toFixed(6)) },
       mode: p.mode,
@@ -392,7 +402,7 @@ export class PeerManager {
       ...(p.objective ? { objective: p.objective } : {}),
       ...(p.watchCwd ? { watchCwd: p.watchCwd } : {}),
     }));
-    if (entries.length > 0) writeRoster(cwd, entries);
+    if (entries.length > 0) this.mergeRoster(cwd, entries);
     for (const p of [...this.peers.values()]) {
       if (p.status === "stopped") continue;
       p.status = "stopped";
@@ -419,7 +429,12 @@ export class PeerManager {
     const { existsSync } = await import("node:fs");
     const parentId = this.parentSessionId();
     const entries = readRoster(cwd).filter(
-      (e) => e.parentSessionId === parentId && e.status !== "stopped" && !this.peers.has(e.name),
+      (e) =>
+        e.parentSessionId === parentId &&
+        // Ended agents stay in the census but are not revived: a finished
+        // mission must not start ticking again on session resume.
+        !["stopped", "done", "exhausted"].includes(e.status) &&
+        !this.peers.has(e.name),
     );
     if (entries.length === 0) return 0;
     const mod: any = await import("@earendil-works/pi-coding-agent");
@@ -497,9 +512,27 @@ export class PeerManager {
     }
   }
 
+  /** Write MY agents while preserving every agent owned by another session in
+   *  this project. Two pi sessions in one directory used to overwrite each
+   *  other's roster wholesale, making agents vanish from the census. */
+  private mergeRoster(cwd: string, mine: RosterEntry[]): void {
+    const myId = this.parentSessionId();
+    const foreign = readRoster(cwd).filter((e) => e.parentSessionId !== myId);
+    writeRoster(cwd, [...foreign, ...mine]);
+  }
+
+  /** Callsigns are unique across the whole PROJECT, not just this session —
+   *  a second session must not mint a colliding name. */
   private callsign(role: PeerRole): string {
     const base = role.name.includes("-") ? role.name.split("-").pop()! : role.name;
-    const n = (this.counters.get(base) ?? 0) + 1;
+    const taken = new Set<string>([...this.peers.keys()]);
+    try {
+      for (const e of readRoster(this.ctx?.cwd ?? process.cwd()) as RosterEntry[]) taken.add(e.name);
+    } catch {
+      /* roster unreadable — session-local uniqueness still holds */
+    }
+    let n = (this.counters.get(base) ?? 0) + 1;
+    while (taken.has(`${base}-${n}`)) n++;
     this.counters.set(base, n);
     return `${base}-${n}`;
   }

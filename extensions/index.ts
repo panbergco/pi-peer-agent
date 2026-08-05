@@ -114,6 +114,12 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             // bottom border always paints (verified by screenshot loop).
             getMaxRows: () => overlayDims(tui).maxHeight - 3,
             getModels: () => manager.listModels(),
+            getForeignAgents: () => {
+              const mine = new Set(manager.all.map((p) => p.name));
+              return readRoster(ctx.cwd)
+                .filter((r) => !mine.has(r.name))
+                .map((r) => ({ name: r.name, role: r.role, status: r.status, mode: r.mode }));
+            },
             onTick: (name: string, minutes: number) => {
               if (manager.setTick(name, minutes * 60)) (lastCtx ?? ctx).ui?.notify?.(`${name}: tick → ${minutes}m`, "info");
             },
@@ -222,12 +228,16 @@ export default function piPeerAgent(pi: ExtensionAPI) {
           // showing minutes) — blanket 1Hz repaints read as flicker.
           let lastSig = "";
           countdown = setInterval(() => {
-            const sig = manager.active
-              .map((p) => {
-                const s = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
-                return `${p.name}:${p.busy ? "busy" : s >= 90 ? `${Math.ceil(s / 60)}m` : `${s}s`}`;
-              })
-              .join("|");
+            const sig =
+              manager.active
+                .map((p) => {
+                  const s = Math.max(0, Math.round((p.nextTickAt - Date.now()) / 1000));
+                  return `${p.name}:${p.busy ? "busy" : s >= 90 ? `${Math.ceil(s / 60)}m` : `${s}s`}`;
+                })
+                .join("|") +
+              // Include the project census: agents launched by ANOTHER session
+              // must appear without waiting for a local event (IP-06).
+              "#" + readRoster(ctx.cwd).map((r) => `${r.name}:${r.status}`).join(",");
             if (sig !== lastSig) {
               lastSig = sig;
               tui.requestRender();
@@ -587,14 +597,26 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       const roles = discoverRoles(ctx.cwd)
         .map((r) => `- ${r.name} (${r.source}): ${r.description} [tick ${Math.round(r.tick / 60)}m, ≤${r.priorityCeiling}, ${r.context}]`)
         .join("\n");
-      const active = manager.active
-        .map((p) => `- ${p.name} (${p.role.name}) · ${p.status} · tick ${p.tickCount} · findings ${p.findings.length} · task: ${p.task}`)
-        .join("\n");
-      const persisted = readRoster(ctx.cwd);
+      // CENSUS (IP-06): every agent this surface launched — live, ended, or
+      // from a previous session — so nothing this project runs is hidden.
+      const live = manager.all;
+      const liveNames = new Set(live.map((p) => p.name));
+      const census = [
+        ...live.map(
+          (p) =>
+            `- ${p.name} [${p.mode}] (${p.role.name}) · ${p.status} · ${p.mode === "mission" ? `cycles ${p.cycles}/${p.objective?.maxCycles ?? 20} until ${p.objective?.kind}:${p.objective?.value}` : `tick ${p.tickCount}`} · findings ${p.findings.length} · $${p.usage.costUsd.toFixed(3)} · task: ${p.task}`,
+        ),
+        ...readRoster(ctx.cwd)
+          .filter((r) => !liveNames.has(r.name))
+          .map(
+            (r) =>
+              `- ${r.name} [${r.mode ?? "watch"}] (${r.role}) · ${r.status} (from durable state) · task: ${r.task} · resume: pi --session ${r.peerSessionFile}`,
+          ),
+      ].join("\n");
       return {
         content: [{
           type: "text" as const,
-          text: `ROLES:\n${roles || "(none)"}\n\nACTIVE PEERS (peer_roster with name for full detail):\n${active || "(none)"}${persisted.length && !manager.active.length ? `\n\nroster.json lists ${persisted.length} peers from a previous run` : ""}`,
+          text: `ROLES:\n${roles || "(none)"}\n\nAGENT CENSUS — every agent launched through this surface (peer_roster with name for full detail):\n${census || "(none)"}`,
         }], details: {},
       };
     },

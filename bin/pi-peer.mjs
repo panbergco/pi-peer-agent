@@ -108,7 +108,8 @@ const HELP = `pi-peer — control a project's resident peer crew from the shell
 
 usage: pi-peer [--cwd <dir>] <command>
 
-  list                                     crew overview (no live session needed)
+  census                                   FULL picture of every agent (no live session needed)
+  list                                     one-line crew overview (no live session needed)
   findings [name]                          delivered findings from the ledger (no session needed)
   launch <role> <task…> [--tick <min>] [--context fork|compacted|fresh] [--watch <dir>]
          [--until-file <path> | --until-exit0 '<cmd>'] [--max-cycles N]   # MISSION mode
@@ -136,6 +137,41 @@ async function main() {
           `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${String(e.status).padEnd(10)} tick ${String(Math.round((e.tickBaseS ?? 300) / 60) + "m").padEnd(5)}${u}${m} · ${e.task}`,
         );
       }
+      return;
+    }
+    case "census": {
+      // The complete picture from durable state — no live session needed.
+      const roster = readRoster();
+      const led = readLedgerTail(5000);
+      const findingsBy = {};
+      for (const e of led) {
+        if ((e.kind === "finding.delivered" || e.kind === "inbox.delivered") && e.peer) {
+          findingsBy[e.peer] = (findingsBy[e.peer] ?? 0) + 1;
+        }
+      }
+      const spawned = led.filter((e) => e.kind === "peer.spawned");
+      if (roster.length === 0) {
+        console.log("no agents on record — launch one with: pi-peer launch <role> <task…>");
+        return;
+      }
+      console.log(`AGENT CENSUS · ${roster.length} on record · project ${cwd}\n`);
+      for (const e of roster) {
+        const mode = e.mode ?? "watch";
+        const prog = mode === "mission"
+          ? `cycles ${e.cycles ?? 0}/${e.objective?.maxCycles ?? 20} until ${e.objective?.kind}:${e.objective?.value}`
+          : `tick every ${Math.round((e.tickBaseS ?? 300) / 60)}m`;
+        const u = e.usage ? `↑${e.usage.input} ↓${e.usage.output} $${e.usage.costUsd.toFixed(3)}` : "no usage recorded";
+        console.log(`${e.name}  [${mode}] ${e.role} · ${e.status}`);
+        console.log(`  purpose : ${e.task}`);
+        console.log(`  progress: ${prog} · findings ${findingsBy[e.name] ?? 0}`);
+        console.log(`  cost    : ${u} · model ${e.model}`);
+        if (e.watchCwd) console.log(`  watching: ${e.watchCwd}`);
+        console.log(`  address : ${e.address}`);
+        console.log(`  talk    : pi-peer --cwd ${cwd} talk ${e.name} "…"`);
+        console.log(`  resume  : pi --session ${e.peerSessionFile}\n`);
+      }
+      const missing = spawned.map((s) => s.peer).filter((n) => !roster.some((r) => r.name === n));
+      if (missing.length > 0) console.log(`NOTE: ${missing.length} spawned agent(s) not in the roster: ${[...new Set(missing)].join(", ")}`);
       return;
     }
     case "findings": {
