@@ -69,8 +69,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       `fresh — blank slate${role.context === "fresh" ? " (role default)" : ""}`,
     ]);
     const mode = modePick?.split(" ")[0] as any;
-    const peer = await manager.launch(ctx, role, task, mode);
-    ui.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(role.tick / 60)}m)`, "info");
+    const tickAnswer = await ui.input(`Tick interval in minutes (role default ${Math.round(role.tick / 60)})`, String(Math.round(role.tick / 60)));
+    const tickMin = Number.parseInt(tickAnswer ?? "", 10);
+    const effRole = Number.isFinite(tickMin) && tickMin >= 1 ? { ...role, tick: tickMin * 60 } : role;
+    const peer = await manager.launch(ctx, effRole, task, mode);
+    ui.notify?.(`${peer.name} launched (${peer.contextMode}, tick ${Math.round(effRole.tick / 60)}m)`, "info");
     if (!sidecar) void openSidecar(ctx);
   }
 
@@ -129,10 +132,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
             onLaunchDirect: (roleName: string, task: string) => {
               const role = discoverRoles(ctx.cwd).find((r) => r.name === roleName);
               if (!role) {
-                (lastCtx ?? ctx).ui?.notify?.(`unknown role "${roleName}" — /peer list`, "error");
+                (lastCtx ?? ctx).ui?.notify?.(`unknown role "${roleName}" — /peers list`, "error");
                 return;
               }
-              void manager.launch(lastCtx ?? ctx, role, task).then(() => tui.requestRender());
+              // Support --tick <min> anywhere in the task words.
+              let tickOverride: number | undefined;
+              const words = task.split(/\s+/).filter((w, i, arr) => {
+                if (w === "--tick") return false;
+                if (arr[i - 1] === "--tick") {
+                  tickOverride = parseTick(w);
+                  return false;
+                }
+                return true;
+              });
+              const effRole = tickOverride ? { ...role, tick: tickOverride } : role;
+              void manager.launch(lastCtx ?? ctx, effRole, words.join(" ")).then(() => tui.requestRender());
             },
             onTalk: (name: string, text: string) => {
               void manager.talk(name, text, "operator").then((res) => {

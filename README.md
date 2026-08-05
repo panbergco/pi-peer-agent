@@ -1,16 +1,15 @@
 # pi-peer-agent
 
-**Resident peer agents for pi** — partners with a standing objective that live *inside*
-your session, wake on a seconds-tick, watch what the main agent does, and **push
+**Resident peer agents for pi** — long-running partners that live *inside* your session,
+wake on their own tick (minutes), inspect what the main agent just did, and **push
 findings into its context** the moment they matter. A pi-native implementation of the
-[MACP 2.0](https://github.com/multiagentcognition/macp) delivery contract: no MCP
-server, no tmux, no child processes.
+MACP delivery contract: no MCP server, no tmux, no child processes.
 
 ```
-/peer launch drift-sentinel watch that all work stays on the calculator utility
+/peers launch drift-sentinel watch that all work stays on the calculator utility --tick 15
 ```
 
-Seconds later, when the main agent wanders off-scope, it receives — mid-work, at its
+Minutes later, when the main agent wanders off-scope, it receives — mid-work, at its
 next inference boundary:
 
 ```
@@ -21,16 +20,19 @@ just created promo.html (2KB landing page) … smallest correction: flag the con
 before expanding further.
 ```
 
-…and every peer is a **real pi session**: named, file-backed, individually resumable
-in any terminal with `pi --session <file>`.
+Every peer is a **real pi session**: named, file-backed, individually resumable in any
+terminal — and if resumed standalone, it can still **report home** through the file
+inbox. Peers are **part of your session**: they suspend on exit/reload and recover
+automatically when the session comes back, memory intact.
 
-## Why not subagents / a sidecar?
+## Why not subagents?
 
-Both are **pull**: a parent spawns and then waits or asks; a human opens an overlay
-and reads. Peers are **push on a loop with a set objective** — the tick (configurable
-per role, seconds-scale) makes monitoring deterministic, and findings travel *toward*
-the worker through pi's own trusted steering channel, visibly attributed, priority-
-tiered (`info` / `steering` / `interrupt` — MACP §7/§8).
+Subagents are **pull**: spawn, wait, collect. Peers are **push on a standing watch** —
+the framework issues ticks (a peer never self-schedules and never stops itself),
+delta-gating skips inference when nothing happened, and findings travel through pi's
+own trusted steering channel: `info` waits for a natural boundary, `steering` wakes an
+idle agent, `interrupt` aborts the running tool call. Verdict protocol: every tick ends
+in `QUIET` or `FINDING[priority]: …`; quiet ticks back off ×1→×8.
 
 ## Install
 
@@ -38,62 +40,105 @@ tiered (`info` / `steering` / `interrupt` — MACP §7/§8).
 pi install git:github.com/panbergco/pi-peer-agent
 ```
 
-Or per-project in `.pi/settings.json`:
-
-```json
-{ "extensions": ["/path/to/pi-peer-agent/extensions/index.ts"] }
-```
+Requires nothing else. Models whose providers come from extensions (e.g. devin) work
+inside peers via the provider-extension bridge (see Configuration).
 
 ## Use
 
-- `/peers launch <role> <task…>` (`--fork|--compacted|--fresh` to pick the context
-  recipe) · `/peers stop <name|all>` · `/peers retask <name> <task…>` ·
-  `/peers broadcast <text…>` · `/peers list`
-- `/peers` (bare) or `Ctrl+Alt+P` — the sidecar: a centered overlay listing every peer;
-  `↑/↓` pick, `Enter` expand/collapse individually, wheel/`PgUp/PgDn` scroll the live
-  pane, `i` insert the latest finding into your prompt, `y`/`Y` yank finding/pane
-  (OSC 52), `r` yank the ready-to-run resume command, `x` stop, `Esc` back, `q` hide.
-- The **main agent** manages peers itself via native tools: `peer_launch`,
-  `peer_roster`, `peer_retask`, `peer_broadcast`, `peer_stop`.
+### One command: `/peers`
+
+- `/peers` — toggle the panel
+- `/peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]`
+- `/peers talk <name> <text…>` · `/peers retask <name> <task…>` · `/peers broadcast <text…>`
+- `/peers stop <name|all>` · `/peers list`
+
+### Keys
+
+- **`Ctrl+Alt+P`** — show / hide the panel
+- **`Ctrl+Alt+O`** — move the keyboard between panel and main prompt (panel stays)
+- **`Esc`** — close the panel (clears a draft first)
+
+### The panel
+
+A fixed-size purple overlay (bright = keys go here, dark = keys in the main prompt;
+only a focused panel has an input box). Type to **talk to the selected peer** — its
+reply streams into the pane. `Tab` switches peers, wheel/`↑↓`/PgUp/PgDn scroll.
+Slash commands autocomplete exactly like pi's own:
+
+- `/launch [role task… --tick <min>]` — bare = interactive picker (role → task →
+  context → **tick minutes**)
+- `/model [query]` — switch the selected peer's model live; the list mirrors **pi's
+  scoped models** (same set as Ctrl+P)
+- `/tick <minutes>` — change the selected peer's interval live
+- `/stop [name]` · `/retask <task…>` · `/insert` (finding → your prompt) ·
+  `/yank` · `/resume` (copy resume command) · `/close` · `/help`
+
+### The main agent controls peers too (full parity)
+
+`peer_launch{role, task, context?, tickMinutes?}` · `peer_talk{name, message}` → reply ·
+`peer_roster{name?}` (deep detail; stopped peers serve history from the ledger) ·
+`peer_model{name, model}` · `peer_retask{name, task, tickMinutes?}` · `peer_broadcast{text}` ·
+`peer_stop{name|all}` · `peer_panel{action, peer?}` (surface the panel for the human).
+
+### Standalone resume
+
+`pi --session <peer session file>` (from the panel's `/resume` or the roster). The peer
+keeps its full memory, gets auto-briefed on reporting, and can push findings back into
+the main session by writing `.pi/peer-agent/inbox/<name>.json`
+(`{"peer": …, "priority": "info"|"steering", "body": …}`) — delivered within seconds,
+attributed `(standalone)`.
 
 ## Roles are markdown
 
 `peers/*.md` (bundled) · `~/.pi/agent/peers/*.md` (user) · `<project>/.pi/peers/*.md`
-(project) — frontmatter + charter body:
+(project). Frontmatter + charter body (injected as the peer's system prompt):
 
 ```markdown
 ---
 name: drift-sentinel
 description: Watches for scope creep vs the stated objective
-tick: 15                 # seconds
-priorityCeiling: steering
-context: compacted       # fork | compacted | fresh
-tools: read, grep, ls    # read-only set — peers structurally cannot write
+tick: 5m                  # minutes (plain number = minutes, floor 1m)
+priorityCeiling: steering # info | steering | interrupt
+context: compacted        # fork | compacted | fresh
+tools: read, grep, ls     # read-only set — peers structurally cannot write
 ---
 You are a drift sentinel …
 ```
 
-Bundled: `drift-sentinel` (scope/objective drift) and `evidence-auditor` (claims
-without proof). Peers answer each tick with `QUIET` or
-`FINDING[priority]: …` — quiet ticks back off (×1→×2→×4→×8), activity resets.
+Bundled roles: **drift-sentinel** (scope/objective drift, 5m), **evidence-auditor**
+(claims vs repository evidence, 10m, fresh eyes), **observer** (the session's living
+memory — ask it what happened, when, and why; info-only, never interrupts, 5m).
+
+## Configuration
+
+`~/.pi/agent/peer-agent.json` (all optional):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `toggleKey` | `ctrl+alt+p` | panel show/hide |
+| `focusKey` | `ctrl+alt+o` | keyboard panel ⇄ main prompt |
+| `overlayWidthRatio` / `overlayHeightRatio` | `0.7` | panel size vs terminal |
+| `providerExtensions` | `["pi-devin-auth", "pi-anthropic-oauth"]` | auth/provider extensions loaded into peer sessions |
+| `deltaCapChars`, `backoff` | `6000`, `[1,2,4,8]` | tick delta cap, quiet-backoff ladder |
 
 ## State
 
-`.pi/peer-agent/` in your project: `events.jsonl` (append-only ledger — spawns,
-ticks, findings, all write-intent-first), `roster.json` (live map: names, addresses,
-session files), plus a managed block in `AGENTS.md` so every agent in the project
-knows peers exist and where the map is.
+`<project>/.pi/peer-agent/`: `roster.json` (live crew map incl. stopped peers —
+identity, task, session file, resume path), `events.jsonl` (append-only ledger:
+spawns, ticks, findings with bodies, suspends/recoveries, model/tick changes),
+`inbox/` (standalone reports). Plus a managed block in `AGENTS.md` so every agent in
+the project knows the control surface. Peer session files live in a `peer-agent/`
+subdirectory of pi's session dir, so `pi --continue` always resumes *your* session.
 
 ## Spec
 
-The full design — identity/binding (MACP addressing), tick engine, delivery contract
-mapping, transports (in-process → file inbox → MACP center), PISG integration plan —
-lives in [docs/peer-agent-spec.md](docs/peer-agent-spec.md).
+Full design — identity/binding (MACP addressing), tick engine, delivery mapping,
+transports, PISG integration plan — in [docs/peer-agent-spec.md](docs/peer-agent-spec.md).
 
 ## Credits
 
-- Delivery contract & addressing: [MACP 2.0](https://github.com/multiagentcognition/macp)
-- In-process session + overlay patterns: [pi-btw-sidecar](https://github.com/MasuRii/pi-btw-sidecar) (MasuRii)
-- Role-file conventions: [pi-subagents](https://github.com/nicobailon/pi-subagents) (nicobailon)
+- Delivery contract & addressing: MACP 2.0
+- In-process session + overlay patterns: pi-btw-sidecar (MasuRii)
+- Role-file conventions: pi-subagents (nicobailon)
 
 MIT.
