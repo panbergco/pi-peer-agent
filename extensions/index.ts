@@ -33,13 +33,13 @@ export default function piPeerAgent(pi: ExtensionAPI) {
 
   /** Bare /peer: strict open/close toggle — closing must ALWAYS work,
    *  regardless of focus state. */
-  function toggleSidecar(ctx: ExtensionContext): void {
+  function toggleSidecar(ctx: ExtensionContext, focus = false): void {
     if (!ctx.hasUI) return;
     if (sidecar) {
       sidecar.close();
       return;
     }
-    void openSidecar(ctx);
+    void openSidecar(ctx, { focus });
   }
 
   /** ctrl+alt+p = SHOW/HIDE toggle (final operator ruling). Opening always
@@ -93,7 +93,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     return { anchor: "top-center" as const, offsetY: 1, width, maxHeight, nonCapturing: true as const };
   }
 
-  async function openSidecar(ctx: ExtensionContext): Promise<void> {
+  async function openSidecar(ctx: ExtensionContext, opts?: { focus?: boolean }): Promise<void> {
     let overlayTui: any = null;
     // 1 Hz countdown refresh while the panel is open — cheap under pi's
     // differential renderer, keeps `next Ns` live without streaming churn.
@@ -236,12 +236,21 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         },
         {
           overlay: true,
-          overlayOptions: () => overlayDims(overlayTui),
+          // nonCapturing: showing the panel must NOT steal focus from the main
+          // prompt. Focus-stealing changes the main layout (footer/hints), and
+          // pi then reflows the WHOLE transcript -- in a long session that
+          // reflow reads as "it reloaded/scrolled". Ctrl+Alt+O grants focus
+          // deliberately; that is when a layout change is expected and wanted.
+          overlayOptions: () => ({ ...overlayDims(overlayTui), nonCapturing: !opts?.focus }),
           onHandle: (handle: any) => {
             if (sidecar) {
               sidecar.handle = handle;
-              handle.focus();
-              sidecar.component.focused = true;
+              if (opts?.focus) {
+                handle.focus();
+                sidecar.component.focused = true;
+              } else {
+                sidecar.component.focused = false;
+              }
             }
           },
         },
@@ -431,7 +440,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       track(ctx);
       if (!ctx.hasUI) return;
       if (!sidecar) {
-        void openSidecar(ctx); // opening focuses — sensible for a focus key
+        void openSidecar(ctx, { focus: true }); // the focus key opens focused
         return;
       }
       // Unfocused → focus. (Focused → the panel itself handles the chord
