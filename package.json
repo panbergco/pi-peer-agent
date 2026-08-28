@@ -1,0 +1,36 @@
+{
+  "name": "pi-peer-agent",
+  "version": "0.25.0",
+  "description": "Resident peer agents for pi: standing objectives on a seconds-tick, real resumable pi sessions, findings pushed into the main agent at inference boundaries (MACP 2.0 delivery contract, pi-native).",
+  "type": "module",
+  "scripts": {
+    "check:panel-latency": "node tools/panel-latency-check.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/panbergco/pi-peer-agent.git"
+  },
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "agents",
+    "macp",
+    "multi-agent",
+    "peer"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "bin": {
+    "pi-peer": "bin/pi-peer.mjs"
+  }
+}
