@@ -142,7 +142,7 @@ import {
   machineRulesFile,
   projectRulesFile,
   DEFAULT_RULES,
-} from "../src/talkrules.ts";
+} from "../src/talkrules.mjs";
 
 function readRoster() {
   try {

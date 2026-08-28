@@ -16,54 +16,65 @@
  *  stored inside the thing it grants access to is not a permission — a project could write
  *  itself reach into another. A project may add rules about ITSELF, and is refused, by
  *  name, if it names another project or uses `*`.
+ *
+ *  Written in plain JavaScript, with its types in comments, for one reason: the shell
+ *  command and the in-session extension must obey the SAME rules, and the command is a
+ *  script that runs from wherever it is installed. A TypeScript source cannot be imported
+ *  from an installed package, so a second hand-copied engine used to live in the command —
+ *  and it drifted twice in a single day. One file, no build step, both callers.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export type Party = "peer" | "parent";
+/** @typedef {"peer" | "parent"} Party */
 
-export interface TalkRule {
-  /** Who is speaking: a kind, or one named agent/session (`peer:<name>`, `parent:<id>`). */
-  from: string;
-  /** Who is spoken to, in the same shape. */
-  to: string;
-  /** The SENDER's project: `*` for any, or an absolute path. */
-  in: string;
-  /** The RECIPIENT's project: `same` for the sender's own, `*` for every project on the
-   *  machine, or an absolute path for that one. */
-  to_project: string;
-  allow?: boolean;
-  deny?: boolean;
-}
+/**
+ * @typedef {object} TalkRule
+ * @property {string} from  Who is speaking: a kind, or one named agent/session
+ *   (`peer:<name>`, `parent:<id>`).
+ * @property {string} to  Who is spoken to, in the same shape.
+ * @property {string} in  The SENDER's project: `*` for any, or an absolute path.
+ * @property {string} to_project  The RECIPIENT's project: `same` for the sender's own,
+ *   `*` for every project on the machine, or an absolute path for that one.
+ * @property {boolean} [allow]
+ * @property {boolean} [deny]
+ */
 
-export interface RuleSource {
-  file: string;
-  rules: TalkRule[];
-  /** Rules refused at parse time, with the reason — never silently dropped. */
-  refused: Array<{ rule: TalkRule; why: string }>;
-}
+/**
+ * @typedef {object} RuleSource
+ * @property {string} file
+ * @property {TalkRule[]} rules
+ * @property {Array<{rule: TalkRule, why: string}>} refused  Rules refused at parse time,
+ *   with the reason — never silently dropped.
+ */
+
+/** @typedef {{machine: RuleSource, project: RuleSource}} Rules */
 
 /** A fresh machine talks inside a project, and not across it. */
-export const DEFAULT_RULES: TalkRule[] = [
+/** @type {TalkRule[]} */
+export const DEFAULT_RULES = [
   { from: "peer", to: "peer", in: "*", to_project: "same", allow: true },
   { from: "parent", to: "peer", in: "*", to_project: "same", allow: true },
   { from: "peer", to: "parent", in: "*", to_project: "same", allow: true },
 ];
 
-export function machineRulesFile(): string {
+/** @returns {string} */
+export function machineRulesFile() {
   return join(homedir(), ".pi", "agent", "peer-agent.json");
 }
 
-export function projectRulesFile(project: string): string {
+/** @param {string} project @returns {string} */
+export function projectRulesFile(project) {
   return join(project, ".pi", "peer-agent.json");
 }
 
-function readRules(file: string): TalkRule[] | null {
+/** @param {string} file @returns {TalkRule[] | null} */
+function readRules(file) {
   try {
     if (!existsSync(file)) return null;
     const raw = JSON.parse(readFileSync(file, "utf8"));
-    return Array.isArray(raw?.talk) ? (raw.talk as TalkRule[]) : null;
+    return Array.isArray(raw?.talk) ? raw.talk : null;
   } catch {
     return null;
   }
@@ -71,7 +82,8 @@ function readRules(file: string): TalkRule[] | null {
 
 /** A project may only speak about itself. Anything else is refused BY NAME so a mistaken
  *  grant is loud rather than invisible — a silently ignored rule reads as a working one. */
-function screenProjectRule(rule: TalkRule, project: string): string | null {
+/** @param {TalkRule} rule @param {string} project @returns {string | null} */
+function screenProjectRule(rule, project) {
   const mine = resolve(project);
   // A project file may only take reach AWAY. An allow here would grant what the machine
   // did not — including inside the project itself, if the machine's own grant were absent
@@ -83,13 +95,16 @@ function screenProjectRule(rule: TalkRule, project: string): string | null {
   return null;
 }
 
-export function loadRules(project: string): { machine: RuleSource; project: RuleSource } {
+/** @param {string} project @returns {Rules} */
+export function loadRules(project) {
   const mFile = machineRulesFile();
-  const machine: RuleSource = { file: mFile, rules: readRules(mFile) ?? DEFAULT_RULES, refused: [] };
+  /** @type {RuleSource} */
+  const machine = { file: mFile, rules: readRules(mFile) ?? DEFAULT_RULES, refused: [] };
 
   const pFile = projectRulesFile(project);
   const declared = readRules(pFile) ?? [];
-  const pSource: RuleSource = { file: pFile, rules: [], refused: [] };
+  /** @type {RuleSource} */
+  const pSource = { file: pFile, rules: [], refused: [] };
   for (const rule of declared) {
     const why = screenProjectRule(rule, project);
     if (why) pSource.refused.push({ rule, why });
@@ -98,7 +113,8 @@ export function loadRules(project: string): { machine: RuleSource; project: Rule
   return { machine, project: pSource };
 }
 
-function partyMatches(pattern: string, kind: Party, name: string): boolean {
+/** @param {string} pattern @param {Party} kind @param {string} name @returns {boolean} */
+function partyMatches(pattern, kind, name) {
   if (pattern === kind || pattern === `${kind}:*`) return true;
   const [patKind, patName] = pattern.split(":");
   // A sender that crossed a project carries its home with it (`name@/path`), so match on
@@ -106,30 +122,32 @@ function partyMatches(pattern: string, kind: Party, name: string): boolean {
   return patKind === kind && patName === name.split("@")[0];
 }
 
-function projectMatches(pattern: string, senderProject: string, subject: string): boolean {
+/** @param {string} pattern @param {string} senderProject @param {string} subject @returns {boolean} */
+function projectMatches(pattern, senderProject, subject) {
   if (pattern === "*") return true;                                   // every project
   if (pattern === "same") return resolve(subject) === resolve(senderProject);
   return resolve(pattern) === resolve(subject);
 }
 
-export interface TalkAttempt {
-  from: Party;
-  fromName: string;
-  fromProject: string;
-  to: Party;
-  toName: string;
-  toProject: string;
-}
+/**
+ * @typedef {object} TalkAttempt
+ * @property {Party} from
+ * @property {string} fromName
+ * @property {string} fromProject
+ * @property {Party} to
+ * @property {string} toName
+ * @property {string} toProject
+ */
 
-export interface Verdict {
-  allowed: boolean;
-  /** The rule that decided, and the file it came from. */
-  by?: { rule: TalkRule; file: string };
-  /** What a human would have to add to permit this, when nothing did. */
-  wouldAllow?: TalkRule;
-}
+/**
+ * @typedef {object} Verdict
+ * @property {boolean} allowed
+ * @property {{rule: TalkRule, file: string}} [by]  The rule that decided, and its file.
+ * @property {TalkRule} [wouldAllow]  What a human would add to permit this, when nothing did.
+ */
 
-function ruleMatches(rule: TalkRule, a: TalkAttempt): boolean {
+/** @param {TalkRule} rule @param {TalkAttempt} a @returns {boolean} */
+function ruleMatches(rule, a) {
   return (
     partyMatches(rule.from, a.from, a.fromName) &&
     partyMatches(rule.to, a.to, a.toName) &&
@@ -139,7 +157,8 @@ function ruleMatches(rule: TalkRule, a: TalkAttempt): boolean {
 }
 
 /** Deny wins wherever it sits, and nothing matching means refused. */
-export function judge(attempt: TalkAttempt, sources: { machine: RuleSource; project: RuleSource }): Verdict {
+/** @param {TalkAttempt} attempt @param {Rules} sources @returns {Verdict} */
+export function judge(attempt, sources) {
   const all = [
     ...sources.machine.rules.map((rule) => ({ rule, file: sources.machine.file })),
     ...sources.project.rules.map((rule) => ({ rule, file: sources.project.file })),
@@ -165,7 +184,8 @@ export function judge(attempt: TalkAttempt, sources: { machine: RuleSource; proj
 
 /** The sentence a refused sender reads. It names the rule that would permit it, because a
  *  refusal nobody can act on is a dead end. */
-export function refusalText(attempt: TalkAttempt, verdict: Verdict): string {
+/** @param {TalkAttempt} attempt @param {Verdict} verdict @returns {string} */
+export function refusalText(attempt, verdict) {
   if (verdict.by?.rule.deny) {
     return (
       `refused by a rule in ${verdict.by.file}: ` +
@@ -185,9 +205,10 @@ export function refusalText(attempt: TalkAttempt, verdict: Verdict): string {
  *  enumerate the machine, so reaching another project's agent by bare name requires a rule
  *  that names that project — which is exactly how the operator described it (A names B).
  */
-export function reachableProjects(senderProject: string, sources: { machine: RuleSource; project: RuleSource }): string[] {
+/** @param {string} senderProject @param {Rules} sources @returns {string[]} */
+export function reachableProjects(senderProject, sources) {
   const here = resolve(senderProject);
-  const out = new Set<string>([here]);
+  const out = new Set([here]);
   for (const rule of [...sources.machine.rules, ...sources.project.rules]) {
     if (!rule.allow) continue;
     if (!projectMatches(rule.in, here, here)) continue;
@@ -200,13 +221,12 @@ export function reachableProjects(senderProject: string, sources: { machine: Rul
 /** Every rule in force for a project, in the order they are read, each carrying the file
  *  it came from and whether it grants or refuses. Listing them is how a person answers
  *  "why can this agent reach that one?" without opening two files by hand. */
-export function effectiveRules(
-  project: string,
-): Array<{ rule: TalkRule; file: string; kind: "allow" | "deny" }> {
+/** @param {string} project @returns {Array<{rule: TalkRule, file: string, kind: "allow"|"deny"}>} */
+export function effectiveRules(project) {
   const { machine, project: proj } = loadRules(project);
   return [...machine.rules, ...proj.rules].map((rule) => ({
     rule,
     file: machine.rules.includes(rule) ? machine.file : proj.file,
-    kind: rule.deny ? ("deny" as const) : ("allow" as const),
+    kind: rule.deny ? /** @type {const} */ ("deny") : /** @type {const} */ ("allow"),
   }));
 }

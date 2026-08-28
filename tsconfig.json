@@ -6,12 +6,23 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    
     "paths": {
-      "@earendil-works/pi-coding-agent": ["/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"],
-      "@earendil-works/pi-tui": ["/usr/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.d.ts"],
-      "typebox": ["/usr/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/build/index.d.mts"]
-    }
+      "@earendil-works/pi-coding-agent": [
+        "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"
+      ],
+      "@earendil-works/pi-tui": [
+        "/usr/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.d.ts"
+      ],
+      "typebox": [
+        "/usr/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/build/index.d.mts"
+      ]
+    },
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src/**/*.ts", "extensions/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.mjs",
+    "extensions/**/*.ts"
+  ]
 }
