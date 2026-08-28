@@ -6,7 +6,7 @@
   "scripts": {
     "check:panel-latency": "node tools/panel-latency-check.mjs"
   },
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/panbergco/pi-peer-agent.git"
