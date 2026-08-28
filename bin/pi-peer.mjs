@@ -875,6 +875,12 @@ export async function report(words, project) {
 }
 
 // Only run as a command when invoked as one — importing it must not execute anything.
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// Through the REAL path on both sides: installed, this file is reached by a symlink in
+// /usr/bin, so comparing the name it was called by against the file it actually is made
+// the command print nothing at all while still exiting 0.
+const invokedAs = (() => {
+  try { return process.argv[1] ? fs.realpathSync(process.argv[1]) : null; } catch { return process.argv[1] ?? null; }
+})();
+if (invokedAs && invokedAs === fs.realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((err) => fail(String(err)));
 }
