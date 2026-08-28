@@ -2,8 +2,8 @@
 
 **Resident peer agents for pi** — long-running partners that live *inside* your session,
 wake on their own tick (minutes), inspect what the main agent just did, and **push
-findings into its context** the moment they matter. A pi-native implementation of the
-MACP delivery contract: no MCP server, no tmux, no child processes.
+findings into its context** the moment they matter. Built on pi's own extension surface:
+no MCP server, no tmux, no child processes.
 
 ```
 /peers launch observer-watch watch that all work stays on the calculator utility --tick 15
@@ -367,12 +367,12 @@ package installed.
 
 ## Spec
 
-Full design — identity/binding (MACP addressing), tick engine, delivery mapping,
+Full design — identity and binding, the tick engine, how a finding reaches the session,
 transports, embedding notes — in [docs/peer-agent-spec.md](docs/peer-agent-spec.md).
 
 ## Credits
 
-- Delivery contract & addressing: MACP 2.0
+- How findings are addressed and delivered: `docs/peer-agent-spec.md`
 - In-process session + overlay patterns: pi-btw-sidecar (MasuRii)
 - Role-file conventions: pi-subagents (nicobailon)
 

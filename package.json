@@ -1,7 +1,7 @@
 {
   "name": "pi-peer-agent",
   "version": "0.25.0",
-  "description": "Resident peer agents for pi: standing objectives on a seconds-tick, real resumable pi sessions, findings pushed into the main agent at inference boundaries (MACP 2.0 delivery contract, pi-native).",
+  "description": "Resident peer agents for pi: long-running partners that live inside your session, tick on their own rhythm, watch the work, and push findings back into the conversation.",
   "type": "module",
   "scripts": {
     "check:panel-latency": "node tools/panel-latency-check.mjs"
@@ -14,10 +14,12 @@
   "keywords": [
     "pi",
     "pi-extension",
+    "pi-plugin",
     "agents",
-    "macp",
     "multi-agent",
-    "peer"
+    "peer-review",
+    "code-review",
+    "tui"
   ],
   "pi": {
     "extensions": [
