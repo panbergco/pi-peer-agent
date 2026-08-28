@@ -15,7 +15,7 @@ inference boundary. The main agent never polls its peers; discovery travels towa
 worker.
 
 North star: *a reviewer that stops the bug before it ships, without the human — or the
-main agent — ever having to ask.* This is a pi-native implementation of the MACP 2.0
+main agent — ever having to ask.* This is built directly on pi's own extension surface
 delivery contract (spec §8), scoped to one machine and one harness first, with the
 addressing and envelope shape kept protocol-faithful so the real center can be attached
 later as a transport swap.
@@ -32,7 +32,7 @@ not vibes-scheduled.
   extension.
 - **P2 — Push, never pull.** Findings enter the main agent through pi's own trusted
   channel (the steering queue) at an inference boundary — never as tool output, never
-  by polling (MACP 2.0 D1–D6).
+  by polling.
 - **P3 — A peer is a real pi session.** File-backed `SessionManager`, real session ID,
   named, resumable standalone via `pi --session <file>`. No in-memory ghosts.
 - **P4 — Structural capability.** Peers get `createReadOnlyTools()` (read/grep/find/ls).
@@ -61,7 +61,7 @@ before this spec was written (session of 2026-08-05).
 | Fork context natively | `SessionManager.forkFrom(sourcePath, targetCwd)` | same |
 | Resume standalone | `pi --session <file>` | pi CLI; used live this session |
 | Read-only peer tools | `createReadOnlyTools()` (also individual `createReadTool` etc.) | pi SDK exports |
-| Push at boundary | `pi.sendMessage({customType, content, display}, {deliverAs: "steer", triggerTurn})` | pi dist `types.d.ts`; MACP `HARNESSES.md` pi survey (verified @ pinned commit) |
+| Push at boundary | `pi.sendMessage({customType, content, display}, {deliverAs: "steer", triggerTurn})` | pi dist `types.d.ts`; the delivery contract`HARNESSES.md` pi survey (verified @ pinned commit) |
 | Interrupt = create boundary | `ctx.abort()` → tool aborts, partial output retained, then redeliver | same two sources |
 | Live streaming into UI | `session.subscribe((e: AgentSessionEvent) => …)` | btw `btw-runtime-core.ts` |
 | Sidecar overlay | `ctx.ui.custom(factory, {overlay: true, overlayOptions, onHandle})`; `OverlayOptions` anchors incl. `right-center`, `%` sizing, `nonCapturing`, `setHidden` | btw `btw-runtime-core.ts` + pi-tui `tui.d.ts` |
@@ -74,7 +74,7 @@ before this spec was written (session of 2026-08-05).
 
 ## 4. Identity, binding, and awareness
 
-### 4.1 Addressing (MACP §4, adopted verbatim)
+### 4.1 Addressing
 
 ```
 main session:  agent://pi/<main-session-id>
@@ -203,9 +203,9 @@ never delivered). Malformed verdicts are treated as QUIET and counted
 than in the main agent's context. Priorities above the role's ceiling are clamped,
 and the clamp is recorded.
 
-## 7. Delivery contract (MACP 2.0 §8, mapped)
+## 7. How a finding reaches the session
 
-| MACP | pi-peer-agent implementation |
+| Requirement | How this implements it |
 |---|---|
 | D1 drain at boundary | `pi.sendMessage(…, {deliverAs: "steer"})` — pi's steering queue is drained at the next inference boundary natively |
 | D2 append-only | steering delivery appends; nothing rewritten |
@@ -218,7 +218,7 @@ and the clamp is recorded.
 | I4 steering must not abort | enforced structurally: only `interrupt` priority calls `ctx.abort()` |
 | I5 duplicate suppression | envelope IDs (ulid); at-most-once injection per ID |
 
-Message tiers (MACP §6.1): one to one (session→agent retask, agent→session finding), role-cast
+Message tiers: one to one (session→agent retask, agent→session finding), role-cast
 (`role:verifier-like`), telling every agent in a project at once (session→all agents; agent→all). In-process this is
 iteration over the roster; the tiers exist in the envelope schema from day one so the
 center transport (§9.3) changes nothing above the transport seam.
@@ -286,9 +286,9 @@ tick?, ts}`; delivery above the seam is identical.
    (§4.2), and writes envelopes to `<project>/.pi/peer-agent/inbox/<envelope-id>.json`;
    the main session's extension watches the inbox (fs.watch + poll fallback) and
    delivers per §7. At-least-once with I5 dedupe.
-3. **v2 MACP center** — the real `macp/center` (implemented, tested, plain MCP server):
-   register main + peers, `macp_send` for all three tiers, cross-harness roster. A
-   transport swap only; adopted when the need for cross-harness routing arises.
+3. **A shared router** — a small server that registers sessions and their agents and
+   carries all three message tiers, so agents on different tools could reach each other.
+   A transport swap only; adopted if cross-tool routing is ever needed.
 
 ## 10. CLI — `pi-peer` (pi-native contract surface; no MCP)
 
@@ -352,7 +352,7 @@ on its own regardless of what, if anything, is ever integrated with.
   `peer_*` tools, starter roles ship.
 - **P2 — detachment:** file-inbox transport (resumed peers keep reporting), `pi-peer`
   CLI complete.
-- **P3 — embedding + center:** monorepo move, host-side peer verbs, vocabulary registration, MACP
+- **P3 — embedding + center:** monorepo move, host-side peer verbs, vocabulary registration, the delivery contract
   center transport behind the seam.
 
 ## 14. Decision ledger
@@ -363,10 +363,10 @@ on its own regardless of what, if anything, is ever integrated with.
 | decision 2 | Peers are file-backed named pi sessions | resolved | operator benchmark: individually resumable standalone |
 | decision 3 | Fork context = `SessionManager.forkFrom` | resolved | native lineage in the transcript beats message-seeding |
 | decision 4 | Read-only tools for peers, always | resolved | P4/P8; write-gate compatibility for free |
-| decision 5 | MACP envelope + addressing from day one, center deferred | resolved | protocol fidelity is cheap now, retrofit is expensive later |
+| decision 5 | the delivery contractenvelope + addressing from day one, center deferred | resolved | protocol fidelity is cheap now, retrofit is expensive later |
 | decision 6 | `Ctrl+Alt+P` default toggle | resolved | Alt+P taken in operator's environment; configurable regardless |
 | decision 7 | Verdict-line protocol (QUIET/FINDING) over structured output | resolved (v1) | robust to small models; malformed ⇒ QUIET + ledger, never noise; revisit if clamp/malformed rates are high |
-| decision 8 | Info priority never wakes and never steers | resolved | MACP §8.2; attention economics (P6) |
+| decision 8 | Info priority never wakes and never steers | resolved | the delivery contract; attention economics (P6) |
 | decision 9 | Compacted context recipe: reuse parent's latest compaction summary when present, else summarize parent transcript at spawn | open | summarize-at-spawn costs one LLM call; measure whether stale-summary risk matters at P1 |
 | decision 10 | Copy is entry-based (`i` insert-to-editor / `y` OSC-52 yank), not terminal selection | resolved | rectangle selection breaks over bordered overlays; `setEditorText` + `copyToClipboard` are native and verified |
 
@@ -375,8 +375,7 @@ on its own regardless of what, if anything, is ever integrated with.
 - Peer-to-peer direct threads — shipped: an agent's `send` reaches a named sibling.
 - Persistent peer memory across main-session restarts (re-attach to an old peer
   session rather than spawning fresh) — likely `pi-peer attach`, post-P2.
-- Interrupt-priority roles and their authorization ceremony (MACP §9 grants; host-side
-  operator-directive pattern is the likely shape).
+- Interrupt-priority roles and their authorization ceremony.
 - Cost telemetry per peer (tokens/tick) surfaced in `pi-peer status` — P1 stretch.
 
 ## 16. Agent taxonomy — four kinds, cut by what wakes the agent (human ruling 2026-08-06)

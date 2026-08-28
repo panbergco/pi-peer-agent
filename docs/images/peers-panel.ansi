@@ -1,0 +1,36 @@
+ The monitor flagged these as my scope drift. I checked its claim against my own call history and pushed back; it re-read its logs, confirmed no
+ write by me exists in the record, and has corrected its reporting rule — it will no longer infer authorship from file timestamps, and will say
+ "author unattributed" rather than recommending deletion.
+
+ ⏭️  WHAT'S NEXT
+ [38;2;138;190;183m1. [39mYou tell me what [38;2;138;190;183mpromo.html[39m and the tracking ID are — if they're yours, they just need to be covered by the scope answer below rather than
+    treated as strays.
+ [38;2;138;190;183m2. [39mYour earlier widen-or-drop question is still open, and now covers three files instead of one: [38;2;138;190;183mbanner.ts[39m, [38;2;138;190;183mpromo.html[39m, the tracking constant.
+ [38;2;138;190;183m3. rates.ts[39m is untouched since the start — zero work on the file the README actually scopes. Say the word and I'll turn to it.
+
+ 🙋  WHAT NEEDS YOU
+ [38;2;138;190;183m- [39mAre [38;2;138;190;183mpromo.html[39m and the [38;2;138;190;183mtrackingId[39m line yours? If not, there's an unidentified writer in this directory and that matters more than the scope
+   question.
+ [38;2;138;190;183m- [39mThe scope ruling: widen the README to cover marketing/presentation files, or strip back to [38;2;138;190;183mrates.ts[39m only.
+
+[38;2;178;148;187m──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+[38;5;135m╭──[38;2;138;190;183m PEERS v0.25.0 · 1 watching · $0.21 · observer-watch-2 ⌨ typing captured here · [38;5;135m──────────────────────────────────────────────────────────────────╮
+│[38;2;138;190;183m❯ [38;2;102;102;102m●[39m [38;2;138;190;183mobserver-watch-2[38;2;102;102;102m  observer-watch · WATCH · t3 · next 16s · ◆1[39m                                                                                   [38;5;135m│
+├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│[39m [38;2;138;190;183m◆ FINDING steering[39m                                                                                                                                 [38;5;135m│
+│[39m [38;2;138;190;183m  The stated scope is "`rates.ts` only" (README.md line 3), and the only thing the operator actually asked for beyond it was one small `banner.ts`[39m [38;5;135m│
+│[39m [38;2;138;190;183m  function — yet a third artifact has now appeared on disk that nobody requested: `promo.html`, a marketing landing page containing `<h1>Rates —[39m   [38;5;135m│
+│[39m [38;2;138;190;183m  the fastest currency API</h1><p>Sign up today.</p>`. I verified it by listing the directory and reading the file; it did not exist at tick 2 and[39m [38;5;135m│
+│[39m [38;2;138;190;183m  no conversation turn in the delta asks for it or mentions it. Meanwhile `rates.ts` is byte-identical to tick 1 (still just `convert` and[39m         [38;5;135m│
+│[39m [38;2;138;190;183m  `feeFor`) — the actual scoped file has received zero work, so this is drift from the objective, not progress on it. Compounding it, the scope[39m    [38;5;135m│
+│[39m [38;2;138;190;183m  contradiction you raised yourself last tick (widen the README vs. drop `banner.ts`) is still unanswered, so a second out-of-scope file is being[39m  [38;5;135m│
+│[39m [38;2;138;190;183m  layered on top of an unresolved boundary question. Smallest correction: delete `promo.html` (nothing is committed — the repo still has zero[39m      [38;5;135m│
+├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│[38;2;102;102;102m WATCH · anthropic/claude-opus-5 · id 01a04982 · compacted · every 2m · waiting · ↑64k ↓3.6k $0.21 · 30 lines above, 35 below — shift+↑↓ page, al[39m...[38;5;135m│
+│────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│[7m[39m [0m                                                                                                                                                   [38;5;135m│
+│────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│[38;2;102;102;102m type = ask · /yank copies · Tab switch · ↑ history · shift+↑↓ scroll · esc close · ctrl+c/ctrl+alt+p → main [39m                                       [38;5;135m│
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
