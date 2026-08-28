@@ -58,6 +58,10 @@ the provider-extension bridge — see Configuration.
 - `/peer ask <name> <text…>` · `/peer retask <name> <task…>` · `/peer tick <name> <minutes>`
 - `/peer model <name> <provider/model|substring>` · `/peer authority <name> <read-only|write|shell>` · `/peer tell-all <text…>`
 - `/peer stop <name|all>` · `/peer kill <name>` · `/peer list`
+- **Every report the shell command can print** — `census` · `findings` · `cost` · `history` ·
+  `doctor` · `rules` · `audit` · `roles` · `models`. The session asks `pi-peer` for the text
+  rather than rendering the same answers a second time, so the words are identical
+  wherever you ask.
 
 ### Keys
 
@@ -144,8 +148,10 @@ attributed `(standalone)`.
 
 ## Shell CLI — `pi-peer`
 
-Drive the crew from any terminal or script — no pi session in *that* shell needed
-(write commands are applied within ~5s by the live session; reads work always):
+Same word, same verbs, outside the session: `/peer <verb>` in pi and `pi-peer <verb>` in a
+shell are one tool with two doors. Drive the crew from any terminal or script — no pi
+session in *that* shell needed (write commands are applied within ~5s by the live session;
+reads work always):
 
 ```bash
 pi-peer census                                # FULL picture: main sessions + every agent
