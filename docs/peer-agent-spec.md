@@ -226,7 +226,7 @@ center transport (§9.3) changes nothing above the transport seam.
 ## 8. Sidecar UI
 
 - Toggle: `Ctrl+Alt+P` (configurable — `~/.pi/agent/peer-agent.json` `toggleKey`) or
-  `/peers`. Peers run regardless of visibility.
+  `/peer`. Peers run regardless of visibility.
 - Surface: `ctx.ui.custom(…, {overlay: true})`, anchor `right-center`, `width: "30%"`,
   `maxHeight: "90%"`, `nonCapturing` while unfocused; `visible` callback hides below
   120 columns (widget-band fallback: one line per peer above the editor).
@@ -307,7 +307,7 @@ pi-peer init                # write/refresh the AGENTS.md block + .pi/peer-agent
 Model-facing surface (inside the session): `peer_launch`, `peer_ask`, `peer_roster`,
 `peer_model`, `peer_tick`, `peer_retask`, `peer_tell_all`, `peer_stop`, `peer_kill`, and `peer_panel`
 so the MAIN AGENT can manage its peers as tool calls (e.g. "launch an observer-watch"),
-plus `/peers launch|ask|retask|tick|model|authority|stop|kill` for the human.
+plus `/peer launch|ask|retask|tick|model|authority|stop|kill` for the human.
 
 ## 11. Ledger
 

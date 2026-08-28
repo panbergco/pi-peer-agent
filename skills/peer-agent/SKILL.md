@@ -103,8 +103,8 @@ authority: shell       # adds command execution
 
 **Raising it is a human action, never automatic.** Two equivalent surfaces:
 
-- In the main prompt: `/peers authority <name> <read-only|write|shell>` (bare
-  `/peers authority` lists every agent's current level); inside the panel, use
+- In the main prompt: `/peer authority <name> <read-only|write|shell>` (bare
+  `/peer authority` lists every agent's current level); inside the panel, use
   `/authority [name] <level>`
 - From a shell: `pi-peer authority <name> <level>`
 

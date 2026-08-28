@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// @ts-nocheck — this file is a script: 800 lines of argument handling and printing, never
+// type-checked, and typing it wholesale would be a rewrite of working code for no gain.
+// The parts that DECIDE anything live in src/*.mjs, are imported here, and ARE checked.
 /**
  * pi-peer — drive a project's peer crew from any shell, no pi session needed
  * in THIS terminal. Commands are dropped as files into .pi/peer-agent/control/;
@@ -12,10 +15,20 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const argv = process.argv.slice(2);
 
+/** Where this command's words go. A shell run prints them; a pi session collects them and
+ *  shows them in the panel, so the two surfaces cannot drift into different wording — the
+ *  same reason the rule engine, the orphan test and the cadence sentence each have one
+ *  home. Set by run() below. */
+let sink = null;
+const out = (line = "") => (sink ? sink.push(String(line)) : console.log(line));
+
 function fail(msg) {
+  // Inside a session there is no process to exit; the caller wants the sentence back.
+  if (sink) throw new Error(`pi-peer: ${msg}`);
   console.error(`pi-peer: ${msg}`);
   process.exit(1);
 }
@@ -51,12 +64,16 @@ function enforceScope() {
 }
 
 
-const stateDir = path.join(cwd, ".pi", "peer-agent");
-const controlDir = path.join(stateDir, "control");
-const ledgerPath = path.join(stateDir, "events.jsonl");
-const rosterPath = path.join(stateDir, "roster.json");
+let stateDir, controlDir, ledgerPath, rosterPath;
+function recomputePaths() {
+  stateDir = path.join(cwd, ".pi", "peer-agent");
+  controlDir = path.join(stateDir, "control");
+  ledgerPath = path.join(stateDir, "events.jsonl");
+  rosterPath = path.join(stateDir, "roster.json");
+}
+recomputePaths();
 
-const verb = argv.shift();
+let verb = argv.shift();
 
 // `allow` and `disallow` set a mode and a list that the send path never consulted, so a
 // human could "allow" a project and nothing changed. Reach is rules now, and widening one
@@ -84,22 +101,22 @@ if (verb === "version" || verb === "--version" || verb === "-v") {
     }
   };
   const mine = read(selfPkg);
-  console.log(`pi-peer ${mine?.version ?? "?"}`);
-  console.log(`  running from: ${path.dirname(selfPkg)}`);
+  out(`pi-peer ${mine?.version ?? "?"}`);
+  out(`  running from: ${path.dirname(selfPkg)}`);
   const globalPkg = "/usr/lib/node_modules/pi-peer-agent/package.json";
   const g = read(globalPkg);
   if (g) {
-    console.log(`  installed globally: ${g.version} (/usr/lib/node_modules/pi-peer-agent)`);
+    out(`  installed globally: ${g.version} (/usr/lib/node_modules/pi-peer-agent)`);
     if (mine && g.version !== mine.version) {
-      console.log(`  ⚠ MISMATCH: this CLI is ${mine.version} but the globally installed extension is ${g.version}.`);
-      console.log("    Sessions load the global copy unless settings point at a path. Re-pack with:");
-      console.log("      npm pack && sudo npm install -g ./pi-peer-agent-<version>.tgz");
+      out(`  ⚠ MISMATCH: this CLI is ${mine.version} but the globally installed extension is ${g.version}.`);
+      out("    Sessions load the global copy unless settings point at a path. Re-pack with:");
+      out("      npm pack && sudo npm install -g ./pi-peer-agent-<version>.tgz");
     }
   }
   try {
     const s = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".pi", "agent", "settings.json"), "utf8"));
     const entry = (s.packages ?? []).find((p) => String(p).includes("peer-agent"));
-    if (entry) console.log(`  sessions load: ${entry}`);
+    if (entry) out(`  sessions load: ${entry}`);
   } catch {
     /* advisory */
   }
@@ -229,8 +246,8 @@ async function run(cmd, { timeoutMs = 30_000, quietOk = false, silentReply = fal
     );
   }
   if (!ack.ok) fail(ack.message ?? "command failed");
-  if (!quietOk && ack.message) console.log(ack.message);
-  if (ack.reply && !silentReply) console.log(`\n${ack.reply}`);
+  if (!quietOk && ack.message) out(ack.message);
+  if (ack.reply && !silentReply) out(`\n${ack.reply}`);
   return ack;
 }
 
@@ -287,7 +304,7 @@ async function main() {
     case "list": {
       const roster = readRoster();
       if (roster.length === 0) {
-        console.log("no peers (roster empty) — launch one with: pi-peer launch <role> <task…>");
+        out("no peers (roster empty) — launch one with: pi-peer launch <role> <task…>");
         return;
       }
       for (const e of roster) {
@@ -298,7 +315,7 @@ async function main() {
           : e.mode === "task" ? ` [task${e.waveKey ? ` · wave ${e.waveKey}` : ""}${e.status === "retired" ? " · retired" : " · running"}]`
           : e.mode === "goal" ? ` [goal ${e.cycles ?? 0}/${e.objective?.maxCycles ?? 20} until ${e.objective?.kind}:${e.objective?.value}]` : "";
         const shown = isOrphaned(e, roster) ? "orphaned" : String(e.status);
-        console.log(
+        out(
           // A task never ticks — printing an interval for one is the fault this crew
           // spent two rounds of work removing from the other surfaces.
           `${e.name.padEnd(14)} ${e.role.padEnd(18)} ${shown.padEnd(10)} ${rhythmOf(e).padEnd(10)}${u}${m} · ${e.task}`,
@@ -312,7 +329,7 @@ async function main() {
       // `--json` publishes the same picture for a program to read, including the product's
       // OWN live/orphaned verdict, so nothing downstream has to re-derive it from prose.
       if (argv.includes("--json")) {
-        console.log(JSON.stringify(roster.filter((e) => e.kind !== "main").map((e) => ({
+        out(JSON.stringify(roster.filter((e) => e.kind !== "main").map((e) => ({
           name: e.name,
           role: e.role,
           mode: e.mode,
@@ -335,20 +352,20 @@ async function main() {
       }
       const spawned = led.filter((e) => e.kind === "peer.spawned");
       if (roster.length === 0) {
-        console.log("no agents on record — launch one with: pi-peer launch <role> <task…>");
+        out("no agents on record — launch one with: pi-peer launch <role> <task…>");
         return;
       }
       const mains = roster.filter((e) => e.kind === "main");
       const agents = roster.filter((e) => e.kind !== "main");
-      console.log(`AGENT CENSUS · ${mains.length} main session(s) + ${agents.length} agent(s) · project ${cwd}\n`);
+      out(`AGENT CENSUS · ${mains.length} main session(s) + ${agents.length} agent(s) · project ${cwd}\n`);
       for (const m of mains) {
         const stale = m.lastSeenAt && Date.now() - Date.parse(m.lastSeenAt) > 60_000;
         const state = m.status === "stopped" ? "stopped" : stale ? "no heartbeat (stale?)" : "running";
-        console.log(`${m.name}  [MAIN SESSION] · ${state}`);
-        console.log(`  address : ${m.address}`);
-        console.log(`  started : ${m.startedAt}${m.lastSeenAt ? ` · last seen ${m.lastSeenAt}` : ""}`);
-        console.log(`  ask     : pi-peer --cwd ${cwd} ask-parent ${m.peerSessionId.slice(0, 8)} "…"`);
-        console.log(`  resume  : pi --session ${m.peerSessionFile}\n`);
+        out(`${m.name}  [MAIN SESSION] · ${state}`);
+        out(`  address : ${m.address}`);
+        out(`  started : ${m.startedAt}${m.lastSeenAt ? ` · last seen ${m.lastSeenAt}` : ""}`);
+        out(`  ask     : pi-peer --cwd ${cwd} ask-parent ${m.peerSessionId.slice(0, 8)} "…"`);
+        out(`  resume  : pi --session ${m.peerSessionFile}\n`);
       }
       for (const e of agents) {
         const mode = e.mode ?? "watch";
@@ -361,22 +378,22 @@ async function main() {
           : `ticks ${rhythmOf(e)}`;
         const u = e.usage ? `↑${e.usage.input} ↓${e.usage.output} $${e.usage.costUsd.toFixed(3)}` : "no usage recorded";
         const orphan = isOrphaned(e, roster);
-        console.log(`${e.name}  [${mode}] ${e.role} · ${orphan ? "orphaned" : e.status}`);
-        if (orphan) console.log(`  orphaned: its session is gone — no live session is ticking this agent; resume it below`);
-        console.log(`  purpose : ${e.task}`);
-        console.log(`  progress: ${prog} · findings ${findingsBy[e.name] ?? 0}`);
-        if (e.handoffSummary) console.log(`  handoff : ${e.handoffSummary}`);
-        console.log(`  cost    : ${u} · model ${e.model}`);
+        out(`${e.name}  [${mode}] ${e.role} · ${orphan ? "orphaned" : e.status}`);
+        if (orphan) out(`  orphaned: its session is gone — no live session is ticking this agent; resume it below`);
+        out(`  purpose : ${e.task}`);
+        out(`  progress: ${prog} · findings ${findingsBy[e.name] ?? 0}`);
+        if (e.handoffSummary) out(`  handoff : ${e.handoffSummary}`);
+        out(`  cost    : ${u} · model ${e.model}`);
         // Where its contract came from: a recovered agent used to be untraceable to the
         // file that defines it.
-        if (e.roleFile) console.log(`  contract: ${e.roleFile.replace(os.homedir(), "~")}`);
-        if (e.watchCwd) console.log(`  watching: ${e.watchCwd}`);
-        console.log(`  address : ${e.address}`);
-        console.log(`  ask     : pi-peer --cwd ${cwd} ask ${e.name} "…"`);
-        console.log(`  resume  : pi --session ${e.peerSessionFile}\n`);
+        if (e.roleFile) out(`  contract: ${e.roleFile.replace(os.homedir(), "~")}`);
+        if (e.watchCwd) out(`  watching: ${e.watchCwd}`);
+        out(`  address : ${e.address}`);
+        out(`  ask     : pi-peer --cwd ${cwd} ask ${e.name} "…"`);
+        out(`  resume  : pi --session ${e.peerSessionFile}\n`);
       }
       const missing = spawned.map((s) => s.peer).filter((n) => !roster.some((r) => r.name === n));
-      if (missing.length > 0) console.log(`NOTE: ${missing.length} spawned agent(s) not in the roster: ${[...new Set(missing)].join(", ")}`);
+      if (missing.length > 0) out(`NOTE: ${missing.length} spawned agent(s) not in the roster: ${[...new Set(missing)].join(", ")}`);
       return;
     }
     case "history": {
@@ -425,21 +442,21 @@ async function main() {
       if (wantPeer) list = list.filter((s) => [...s.agents.keys()].some((n) => n.includes(wantPeer)));
       list.sort((a, b) => String(a.started ?? "").localeCompare(String(b.started ?? "")));
       if (argv.includes("--json")) {
-        console.log(JSON.stringify({ project, unattributableEvents: unstamped, sessions: list.map((s) => ({ ...s, agents: [...s.agents.values()] })) }, null, 2));
+        out(JSON.stringify({ project, unattributableEvents: unstamped, sessions: list.map((s) => ({ ...s, agents: [...s.agents.values()] })) }, null, 2));
         return;
       }
-      console.log(`project ${path.basename(project)}  (${project})`);
-      console.log(`${list.length} pi session(s) on record${unstamped ? ` · ${unstamped} older event(s) predate per-event attribution and are not shown` : ""}\n`);
+      out(`project ${path.basename(project)}  (${project})`);
+      out(`${list.length} pi session(s) on record${unstamped ? ` · ${unstamped} older event(s) predate per-event attribution and are not shown` : ""}\n`);
       for (const s of list) {
         const span = `${(s.started ?? "?").slice(11, 19)} → ${s.ended ? s.ended.slice(11, 19) : "still running"}`;
-        console.log(`pi ${s.id}  ${span}`);
-        console.log(`   transcript: ${s.file ? s.file.replace(os.homedir(), "~") : "(not recorded)"}`);
-        if (s.agents.size === 0) console.log("   (spawned no agents)");
+        out(`pi ${s.id}  ${span}`);
+        out(`   transcript: ${s.file ? s.file.replace(os.homedir(), "~") : "(not recorded)"}`);
+        if (s.agents.size === 0) out("   (spawned no agents)");
         for (const a of [...s.agents.values()]) {
-          console.log(`   └─ ${a.name}  ${a.role ?? "?"}${a.kind ? ` · ${a.kind}` : ""} · ${a.ticks} tick(s) · ${a.findings} finding(s) · $${a.cost.toFixed(3)}${a.end ? ` · ${a.end}` : ""}${a.movedFrom ? ` · moved here from ${String(a.movedFrom).slice(0, 8)}` : ""}`);
-          console.log(`        transcript: ${a.file ? a.file.replace(os.homedir(), "~") : "(not recorded)"}`);
+          out(`   └─ ${a.name}  ${a.role ?? "?"}${a.kind ? ` · ${a.kind}` : ""} · ${a.ticks} tick(s) · ${a.findings} finding(s) · $${a.cost.toFixed(3)}${a.end ? ` · ${a.end}` : ""}${a.movedFrom ? ` · moved here from ${String(a.movedFrom).slice(0, 8)}` : ""}`);
+          out(`        transcript: ${a.file ? a.file.replace(os.homedir(), "~") : "(not recorded)"}`);
         }
-        console.log("");
+        out("");
       }
       return;
     }
@@ -449,12 +466,12 @@ async function main() {
         (e) => (e.kind === "finding.delivered" || e.kind === "inbox.delivered") && e.body && (!who || e.peer === who),
       );
       if (found.length === 0) {
-        console.log(who ? `no recorded findings for ${who}` : "no recorded findings");
+        out(who ? `no recorded findings for ${who}` : "no recorded findings");
         return;
       }
       for (const e of found) {
-        console.log(`— ${e.peer} · ${e.priority}${e.tick ? ` · tick ${e.tick}` : ""} · ${e.ts}`);
-        console.log(`  ${e.body}\n`);
+        out(`— ${e.peer} · ${e.priority}${e.tick ? ` · tick ${e.tick}` : ""} · ${e.ts}`);
+        out(`  ${e.body}\n`);
       }
       return;
     }
@@ -556,11 +573,11 @@ async function main() {
         ti += u.input; to += u.output; tc += u.costUsd;
         rows.push(`  ${e.name.padEnd(16)} ${String(e.mode ?? "watch").padEnd(6)} ↑${String(u.input).padStart(8)} ↓${String(u.output).padStart(7)} $${u.costUsd.toFixed(4).padStart(9)}${agrees ? "" : "   (disagrees with the ledger)"}`);
       }
-      console.log(`CREW COST · ${roster.length} agent(s) · project ${cwd}`);
-      console.log(rows.join("\n") || "  (no agents yet)");
-      console.log(`  ${"TOTAL".padEnd(16)} ${"".padEnd(6)} ↑${String(ti).padStart(8)} ↓${String(to).padStart(7)} $${tc.toFixed(4).padStart(9)}`);
-      if (tc === 0 && (ti + to) > 0) console.log(`  this provider reports no price — the crew has spent ${ti + to} tokens at a reported cost of $0`);
-      console.log(mismatches === 0
+      out(`CREW COST · ${roster.length} agent(s) · project ${cwd}`);
+      out(rows.join("\n") || "  (no agents yet)");
+      out(`  ${"TOTAL".padEnd(16)} ${"".padEnd(6)} ↑${String(ti).padStart(8)} ↓${String(to).padStart(7)} $${tc.toFixed(4).padStart(9)}`);
+      if (tc === 0 && (ti + to) > 0) out(`  this provider reports no price — the crew has spent ${ti + to} tokens at a reported cost of $0`);
+      out(mismatches === 0
         ? `  every agent's total matches the ledger's own record`
         : `  ${mismatches} agent(s) disagree with the ledger — inspect .pi/peer-agent/events.jsonl`);
       return;
@@ -632,10 +649,10 @@ async function main() {
           else problems.push(`write lock     left behind by a dead process (${held?.holder ?? "unreadable"}, pid ${held?.pid}) — the next writer will take it over`);
         } else notes.push("write lock     free");
       }
-      console.log(`PEER-AGENT DOCTOR · project ${cwd}`);
-      for (const n of notes) console.log(`  ok    ${n}`);
-      for (const p of problems) console.log(`  FAULT ${p}`);
-      console.log(problems.length === 0 ? "  nothing needs your attention" : `  ${problems.length} thing(s) need your attention`);
+      out(`PEER-AGENT DOCTOR · project ${cwd}`);
+      for (const n of notes) out(`  ok    ${n}`);
+      for (const p of problems) out(`  FAULT ${p}`);
+      out(problems.length === 0 ? "  nothing needs your attention" : `  ${problems.length} thing(s) need your attention`);
       process.exit(problems.length === 0 ? 0 : 1);
     }
     case "authority": {
@@ -643,9 +660,9 @@ async function main() {
       const level = argv.shift();
       if (!who) {
         for (const e of readRoster().filter((r) => r.kind !== "main")) {
-          console.log(`  ${e.name}  ${e.authority ?? "read-only"}`);
+          out(`  ${e.name}  ${e.authority ?? "read-only"}`);
         }
-        console.log("  change with: pi-peer authority <name> <read-only|write|shell>");
+        out("  change with: pi-peer authority <name> <read-only|write|shell>");
         return;
       }
       if (!level || !["read-only", "write", "shell"].includes(level)) {
@@ -692,7 +709,7 @@ async function main() {
         const projOf = (s) => otherProject ? path.resolve(otherProject) : (roster.find((e) => e.name === nameOf(s))?.project ?? cwd);
         const attempt = { from: kindOf(from), fromName: nameOf(from), fromProject: cwd, to: kindOf(to), toName: nameOf(to), toProject: projOf(to) };
         const verdict = judge(attempt, loadRules(cwd));
-        console.log(verdict.allowed
+        out(verdict.allowed
           ? `allowed by ${JSON.stringify(verdict.by?.rule)} (${verdict.by?.file})`
           : refusalText(attempt, verdict));
         return;
@@ -708,7 +725,7 @@ async function main() {
         cur.talk = [...(cur.talk ?? []), { from, to, in: cwd, to_project: cwd, deny: true }];
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, JSON.stringify(cur, null, 2));
-        console.log(`denied ${from} → ${to} in ${cwd} (${file})`);
+        out(`denied ${from} → ${to} in ${cwd} (${file})`);
         return;
       }
       if (sub === "allow") {
@@ -720,7 +737,7 @@ async function main() {
         );
       }
       for (const { rule, file, kind } of effectiveRules(cwd)) {
-        console.log(`  ${kind.padEnd(5)} ${String(rule.from).padEnd(8)} → ${String(rule.to).padEnd(8)} in ${rule.in} → ${rule.to_project}   (${file})`);
+        out(`  ${kind.padEnd(5)} ${String(rule.from).padEnd(8)} → ${String(rule.to).padEnd(8)} in ${rule.in} → ${rule.to_project}   (${file})`);
       }
       const { project } = loadRules(cwd);
       for (const r of project.refused) console.error(`  REFUSED in ${project.file}: ${r.why}`);
@@ -733,17 +750,17 @@ async function main() {
         .flatMap((f) => { try { return fs.readFileSync(f, "utf8").trim().split("\n"); } catch { return []; } })
         .map((l) => { try { return JSON.parse(l); } catch { return null; } })
         .filter((e) => e && ["talk.judged", "send.sent", "send.delivered", "send.refused", "ask.sent", "finding.delivered", "finding.refused", "peer.retasked"].includes(e.kind));
-      if (rows.length === 0) { console.log("no messages recorded in this project yet"); return; }
+      if (rows.length === 0) { out("no messages recorded in this project yet"); return; }
       for (const e of rows) {
         const when = String(e.at ?? "").slice(11, 19);
-        if (e.kind === "talk.judged") console.log(`  ${when}  ${e.from} → ${e.to}   ${e.allowed ? "allowed" : "REFUSED"}  by ${e.by ? JSON.stringify(e.by) : "no rule"}`);
-        else if (e.kind === "send.refused") console.log(`  ${when}  ${e.from} → ${e.to}   REFUSED  ${e.why}`);
-        else if (e.kind === "send.delivered") console.log(`  ${when}  ${e.from} → ${e.to}   delivered (${e.status})`);
-        else if (e.kind === "send.sent") console.log(`  ${when}  ${e.from} → ${e.to}   sent (${e.chars} chars)`);
-        else if (e.kind === "finding.delivered") console.log(`  ${when}  ${e.peer} → its session   finding delivered${e.via ? ` (${e.via})` : ""}`);
-        else if (e.kind === "finding.refused") console.log(`  ${when}  ${e.peer} → its session   REFUSED  ${e.why}`);
-        else if (e.kind === "peer.retasked") console.log(`  ${when}  operator → ${e.peer}   new standing task (${String(e.task ?? "").slice(0, 40)})`);
-        else console.log(`  ${when}  ${e.from ?? "?"} → ${e.peer ?? "?"}   asked (${e.chars ?? "?"} chars)`);
+        if (e.kind === "talk.judged") out(`  ${when}  ${e.from} → ${e.to}   ${e.allowed ? "allowed" : "REFUSED"}  by ${e.by ? JSON.stringify(e.by) : "no rule"}`);
+        else if (e.kind === "send.refused") out(`  ${when}  ${e.from} → ${e.to}   REFUSED  ${e.why}`);
+        else if (e.kind === "send.delivered") out(`  ${when}  ${e.from} → ${e.to}   delivered (${e.status})`);
+        else if (e.kind === "send.sent") out(`  ${when}  ${e.from} → ${e.to}   sent (${e.chars} chars)`);
+        else if (e.kind === "finding.delivered") out(`  ${when}  ${e.peer} → its session   finding delivered${e.via ? ` (${e.via})` : ""}`);
+        else if (e.kind === "finding.refused") out(`  ${when}  ${e.peer} → its session   REFUSED  ${e.why}`);
+        else if (e.kind === "peer.retasked") out(`  ${when}  operator → ${e.peer}   new standing task (${String(e.task ?? "").slice(0, 40)})`);
+        else out(`  ${when}  ${e.from ?? "?"} → ${e.peer ?? "?"}   asked (${e.chars ?? "?"} chars)`);
       }
       return;
     }
@@ -785,8 +802,8 @@ async function main() {
       if (models.length === 0) fail(`no model matching "${ref}" among pi's available models`);
       let choice = models[0];
       if (models.length > 1) {
-        console.log(ref ? `"${ref}" matches ${models.length} models:` : `${models.length} models available:`);
-        models.forEach((m, i) => console.log(`  ${String(i + 1).padStart(2)}  ${m}`));
+        out(ref ? `"${ref}" matches ${models.length} models:` : `${models.length} models available:`);
+        models.forEach((m, i) => out(`  ${String(i + 1).padStart(2)}  ${m}`));
         if (!process.stdin.isTTY) {
           fail(`ambiguous — not a TTY, so no picker; re-run with one of the models above`);
         }
@@ -794,7 +811,7 @@ async function main() {
         const answer = (await rl.question(`pick 1-${models.length} for ${name} (empty cancels): `)).trim();
         rl.close();
         const n = Number.parseInt(answer, 10);
-        if (!answer) { console.log("cancelled — nothing changed"); return; }
+        if (!answer) { out("cancelled — nothing changed"); return; }
         if (!Number.isInteger(n) || n < 1 || n > models.length) fail(`"${answer}" is not 1-${models.length} — nothing changed`);
         choice = models[n - 1];
       }
@@ -817,9 +834,34 @@ async function main() {
       return;
     }
     default:
-      console.log(HELP);
+      out(HELP);
       process.exit(verb ? 1 : 0);
   }
 }
 
-main().catch((err) => fail(String(err)));
+/** Ask this command for a report, from inside a pi session, and get the text back.
+ *  READS ONLY: a write verb queues a control file and waits for a live session to apply
+ *  it — asked from inside that session, it would be waiting for itself. */
+export const REPORTS = ["list", "census", "findings", "cost", "history", "doctor", "audit", "rules", "roles", "models"];
+
+export async function report(words, project) {
+  if (!REPORTS.includes(words[0])) throw new Error(`pi-peer: "${words[0]}" is not a report`);
+  const lines = [];
+  sink = lines;
+  cwd = path.resolve(project);
+  recomputePaths();
+  argv.length = 0;
+  argv.push(...words.slice(1));
+  verb = words[0];
+  try {
+    await main();
+    return lines.join("\n");
+  } finally {
+    sink = null;
+  }
+}
+
+// Only run as a command when invoked as one — importing it must not execute anything.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  main().catch((err) => fail(String(err)));
+}

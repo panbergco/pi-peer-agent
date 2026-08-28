@@ -482,7 +482,7 @@ export class PeerManager {
       // charter does (operator: "I authorised it, it refused").
       ...((role.authority ?? DEFAULT_AUTHORITY) === "read-only"
         ? [
-            `You have READ-ONLY tools (${role.tools.join(", ")}) — inspect the repository to verify suspicions before reporting. You cannot modify anything. If a task genuinely requires writing or running commands, say so and tell the operator they can raise your authority with: /peers authority ${name} write   (or shell). Do not pretend you can act, and do not refuse silently.`,
+            `You have READ-ONLY tools (${role.tools.join(", ")}) — inspect the repository to verify suspicions before reporting. You cannot modify anything. If a task genuinely requires writing or running commands, say so and tell the operator they can raise your authority with: /peer authority ${name} write   (or shell). Do not pretend you can act, and do not refuse silently.`,
           ]
         : [
             `You have been ELEVATED to ${role.authority} authority by an explicit human action. Your tools are: ${role.tools.join(", ")}. You MAY modify files${role.authority === "shell" ? " and run commands" : ""} — strictly within ${watchCwd ?? cwd} and nowhere else. This is a deliberate grant: act on it when the task calls for it, keep changes minimal and reversible, and report what you changed. You are still a monitor: do not take on work nobody asked for.`,
@@ -2032,7 +2032,7 @@ export class PeerManager {
   }
 
   /** Change a running agent's authority. Requires an explicit human action at
-   *  the surface that calls this (/peers authority, panel /authority, pi-peer authority) -- there is no
+   *  the surface that calls this (/peer authority, panel /authority, pi-peer authority) -- there is no
    *  auto-elevation path anywhere in the system.
    *
    *  A session's tool set is fixed when the session is created, so raising
