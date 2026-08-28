@@ -196,3 +196,17 @@ export function reachableProjects(senderProject: string, sources: { machine: Rul
   }
   return [...out];
 }
+
+/** Every rule in force for a project, in the order they are read, each carrying the file
+ *  it came from and whether it grants or refuses. Listing them is how a person answers
+ *  "why can this agent reach that one?" without opening two files by hand. */
+export function effectiveRules(
+  project: string,
+): Array<{ rule: TalkRule; file: string; kind: "allow" | "deny" }> {
+  const { machine, project: proj } = loadRules(project);
+  return [...machine.rules, ...proj.rules].map((rule) => ({
+    rule,
+    file: machine.rules.includes(rule) ? machine.file : proj.file,
+    kind: rule.deny ? ("deny" as const) : ("allow" as const),
+  }));
+}

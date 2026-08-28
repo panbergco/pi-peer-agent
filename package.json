@@ -34,5 +34,8 @@
   },
   "bin": {
     "pi-peer": "bin/pi-peer.mjs"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

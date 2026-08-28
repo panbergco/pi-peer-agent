@@ -116,10 +116,12 @@ if (verb === "scope") {
 }
 enforceScope();
 
-/** Mirror of rhythmOf() in src/roles.ts — this CLI is standalone JS and cannot import
- *  the TypeScript source. One place here, not three: the cadence string was hand-rolled
- *  in the crew listing and twice in the census, each with its own wording and its own
- *  default (found by an arc-close audit). Change them TOGETHER. */
+/** The cadence string, from a roster entry rather than a role. The version in
+ *  src/roles.ts reads a loaded role; this one reads what the roster recorded, so they are
+ *  two shapes of one sentence rather than a copied implementation. One place here, not
+ *  three: it was hand-rolled in the crew listing and twice in the census, each with its
+ *  own wording and its own default (found by an arc-close audit). Keep the wording of the
+ *  two in step. */
 function rhythmOf(entry) {
   const kind = entry.mode ?? entry.roleTerms?.kind;
   const tick = entry.tickBaseS ?? entry.roleTerms?.tick ?? 300;
@@ -128,82 +130,19 @@ function rhythmOf(entry) {
 
 
 // ── who may speak to whom ────────────────────────────────────────────────────
-// A MIRROR of src/talkrules.ts. This file is plain JavaScript and cannot import the
-// TypeScript one, so the two are asserted to answer identically over shared cases in the
-// proof bundle — the same discipline the orphan predicate and the cadence formatter follow.
-const DEFAULT_RULES = [
-  { from: "peer", to: "peer", in: "*", to_project: "same", allow: true },
-  { from: "parent", to: "peer", in: "*", to_project: "same", allow: true },
-  { from: "peer", to: "parent", in: "*", to_project: "same", allow: true },
-];
-function machineRulesFile() { return path.join(os.homedir(), ".pi", "agent", "peer-agent.json"); }
-function projectRulesFile(project) { return path.join(project, ".pi", "peer-agent.json"); }
-function readTalk(file) {
-  try {
-    if (!fs.existsSync(file)) return null;
-    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-    return Array.isArray(raw?.talk) ? raw.talk : null;
-  } catch { return null; }
-}
-function screenProjectRule(rule, project) {
-  const mine = path.resolve(project);
-  // A project file may only take reach away; grants belong on the machine.
-  if (rule.allow) return `an allow rule — a project file may only deny; grants belong on the machine (${machineRulesFile()})`;
-  if (rule.in === "*") return `"in": "*" — a project may only write rules about itself (${mine})`;
-  if (rule.to_project === "*") return `"to_project": "*" — a project may not grant reach to every project`;
-  if (path.resolve(rule.in) !== mine) return `"in": "${rule.in}" — a project may only write rules about itself (${mine})`;
-  return null;
-}
-function loadRules(project) {
-  const mFile = machineRulesFile();
-  const machine = { file: mFile, rules: readTalk(mFile) ?? DEFAULT_RULES, refused: [] };
-  const pFile = projectRulesFile(project);
-  const proj = { file: pFile, rules: [], refused: [] };
-  for (const rule of readTalk(pFile) ?? []) {
-    const why = screenProjectRule(rule, project);
-    if (why) proj.refused.push({ rule, why }); else proj.rules.push(rule);
-  }
-  return { machine, project: proj };
-}
-function partyMatches(pattern, kind, name) {
-  if (pattern === kind || pattern === `${kind}:*`) return true;
-  const [patKind, patName] = String(pattern).split(":");
-  // A sender that crossed a project carries its home with it (`name@/path`); match on the
-  // name, since the project is judged by the rule's own project fields.
-  return patKind === kind && patName === String(name).split("@")[0];
-}
-function projectMatches(pattern, senderProject, subject) {
-  if (pattern === "*") return true;                                   // every project
-  if (pattern === "same") return path.resolve(subject) === path.resolve(senderProject);
-  return path.resolve(pattern) === path.resolve(subject);
-}
-function ruleMatches(rule, a) {
-  return partyMatches(rule.from, a.from, a.fromName) && partyMatches(rule.to, a.to, a.toName) &&
-    projectMatches(rule.in, a.fromProject, a.fromProject) && projectMatches(rule.to_project, a.fromProject, a.toProject);
-}
-function judge(attempt, sources) {
-  const all = [
-    ...sources.machine.rules.map((rule) => ({ rule, file: sources.machine.file })),
-    ...sources.project.rules.map((rule) => ({ rule, file: sources.project.file })),
-  ].filter(({ rule }) => ruleMatches(rule, attempt));
-  const denial = all.find(({ rule }) => rule.deny);
-  if (denial) return { allowed: false, by: denial };
-  const permit = all.find(({ rule }) => rule.allow);
-  if (permit) return { allowed: true, by: permit };
-  const same = path.resolve(attempt.fromProject) === path.resolve(attempt.toProject);
-  return { allowed: false, wouldAllow: { from: attempt.from, to: attempt.to, in: attempt.fromProject, to_project: same ? "same" : attempt.toProject, allow: true } };
-}
-function refusalText(attempt, verdict) {
-  if (verdict.by?.rule.deny) return `refused by a rule in ${verdict.by.file}: ${JSON.stringify(verdict.by.rule)} — a deny always wins, wherever it sits.`;
-  return `refused: no rule permits ${attempt.from} "${attempt.fromName}" in ${attempt.fromProject} to reach ${attempt.to} "${attempt.toName}" in ${attempt.toProject}. Add this to ${machineRulesFile()} under "talk": ${JSON.stringify(verdict.wouldAllow)}`;
-}
-function effectiveRules(project) {
-  const { machine, project: proj } = loadRules(project);
-  return [
-    ...machine.rules.map((rule) => ({ rule, file: machine.file, kind: rule.deny ? "deny" : "allow" })),
-    ...proj.rules.map((rule) => ({ rule, file: proj.file, kind: rule.deny ? "deny" : "allow" })),
-  ];
-}
+// ONE implementation, imported from the same file the agents obey. This used to be a
+// hand-copied twin here, and it drifted twice in one day: a wildcard changed meaning in
+// the real engine and the copy kept answering the old way. Node strips the types on
+// import, so there is nothing to build and nothing to keep in step.
+import {
+  judge,
+  loadRules,
+  refusalText,
+  effectiveRules,
+  machineRulesFile,
+  projectRulesFile,
+  DEFAULT_RULES,
+} from "../src/talkrules.ts";
 
 function readRoster() {
   try {
