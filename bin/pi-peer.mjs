@@ -33,6 +33,15 @@ function fail(msg) {
   process.exit(1);
 }
 
+/** Finish. As a shell command that is an exit status; asked from inside a pi session it
+ *  must NOT be — calling process.exit there takes the whole session down with it, which is
+ *  exactly what `/peer doctor` did the first time it was wired in. */
+const DONE = Symbol("pi-peer done");
+function done(code) {
+  if (sink) throw Object.assign(new Error("done"), { [DONE]: true, code });
+  process.exit(code);
+}
+
 // --cwd <dir> anywhere
 let cwd = process.cwd();
 {
@@ -120,7 +129,7 @@ if (verb === "version" || verb === "--version" || verb === "-v") {
   } catch {
     /* advisory */
   }
-  process.exit(0);
+  done(0);
 }
 if (verb === "scope") {
   fail(
@@ -653,7 +662,7 @@ async function main() {
       for (const n of notes) out(`  ok    ${n}`);
       for (const p of problems) out(`  FAULT ${p}`);
       out(problems.length === 0 ? "  nothing needs your attention" : `  ${problems.length} thing(s) need your attention`);
-      process.exit(problems.length === 0 ? 0 : 1);
+      done(problems.length === 0 ? 0 : 1);
     }
     case "authority": {
       const who = argv.shift();
@@ -835,7 +844,7 @@ async function main() {
     }
     default:
       out(HELP);
-      process.exit(verb ? 1 : 0);
+      done(verb ? 1 : 0);
   }
 }
 
@@ -856,6 +865,10 @@ export async function report(words, project) {
   try {
     await main();
     return lines.join("\n");
+  } catch (err) {
+    // A finished report is not a failure: the command says its piece and stops.
+    if (err && err[DONE]) return lines.join("\n");
+    throw err;
   } finally {
     sink = null;
   }
