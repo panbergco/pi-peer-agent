@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.scratch/
+.pi/
+.cocoindex_code/
+*-docs/
+*-proof/
+AGENTS.md
