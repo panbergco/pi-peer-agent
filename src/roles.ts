@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rhythm } from "./rhythm.mjs";
 import type { ContextMode, PeerRole, Priority, Authority } from "./types.js";
 import { AUTHORITY_TOOLS, DEFAULT_AUTHORITY } from "./types.js";
 
@@ -211,9 +212,7 @@ export function roleSummary(role: PeerRole): RoleSummary {
 /** A single agent's rhythm, for surfaces describing a RUNNING agent rather than a
  *  role: "runs once" for a task, "every 15m" for anything the clock wakes. */
 export function rhythmOf(a: { mode?: string; role: { kind?: string; tick: number } }): string {
-  const kind = a.mode ?? a.role.kind;
-  const tick = a.role.tick ?? 300;
-  return kind === "task" ? "runs once" : `every ${Math.round(tick / 60)}m`;
+  return rhythm(a.mode ?? a.role.kind, a.role.tick);
 }
 
 /** One line, in the order every surface uses: what it is, when it wakes, what it may do. */

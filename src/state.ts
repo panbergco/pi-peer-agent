@@ -9,6 +9,8 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdir
 import { dirname, join, resolve } from "node:path";
 import type { PeerConfig, RosterEntry } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
+// The one implementation, in plain JavaScript so the shell command can import it too.
+export { isOrphaned } from "./orphan.mjs";
 import { homedir } from "node:os";
 
 export function stateDir(cwd: string): string {
@@ -286,15 +288,6 @@ export function markMainStopped(cwd: string, sessionId: string): void {
  *  derives the label from THIS predicate so they cannot disagree.
  *  The way back is `pi-peer attach <name>` — a live session adopts it — or
  *  `pi --session <file>` to read it standalone. */
-export function isOrphaned(entry: RosterEntry, roster: RosterEntry[], staleMs = 60_000): boolean {
-  if (entry.kind === "main") return false;
-  if (["stopped", "done", "exhausted"].includes(entry.status)) return false;
-  const owner = roster.find((e) => e.kind === "main" && e.peerSessionId === entry.parentSessionId);
-  if (!owner) return true;
-  if (owner.status === "stopped") return true;
-  const seen = owner.lastSeenAt ? Date.parse(owner.lastSeenAt) : NaN;
-  return !Number.isFinite(seen) || Date.now() - seen > staleMs;
-}
 
 export function loadConfig(): PeerConfig {
   try {

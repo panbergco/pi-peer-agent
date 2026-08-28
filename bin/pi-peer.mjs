@@ -116,17 +116,11 @@ if (verb === "scope") {
 }
 enforceScope();
 
-/** The cadence string, from a roster entry rather than a role. The version in
- *  src/roles.ts reads a loaded role; this one reads what the roster recorded, so they are
- *  two shapes of one sentence rather than a copied implementation. One place here, not
- *  three: it was hand-rolled in the crew listing and twice in the census, each with its
- *  own wording and its own default (found by an arc-close audit). Keep the wording of the
- *  two in step. */
+/** The same sentence, read from a roster entry rather than a loaded role. */
 function rhythmOf(entry) {
-  const kind = entry.mode ?? entry.roleTerms?.kind;
-  const tick = entry.tickBaseS ?? entry.roleTerms?.tick ?? 300;
-  return kind === "task" ? "runs once" : `every ${Math.round(tick / 60)}m`;
+  return rhythm(entry.mode ?? entry.roleTerms?.kind, entry.tickBaseS ?? entry.roleTerms?.tick);
 }
+
 
 
 // ── who may speak to whom ────────────────────────────────────────────────────
@@ -152,18 +146,9 @@ function readRoster() {
   }
 }
 
-/** Mirror of isOrphaned() in src/state.ts — the CLI is standalone JS and
- *  cannot import the TypeScript source. The proof suite asserts both
- *  implementations agree on the same fixtures; change them TOGETHER. */
-function isOrphaned(entry, roster, staleMs = 60_000) {
-  if (entry.kind === "main") return false;
-  if (["stopped", "done", "exhausted"].includes(entry.status)) return false;
-  const owner = roster.find((e) => e.kind === "main" && e.peerSessionId === entry.parentSessionId);
-  if (!owner) return true;
-  if (owner.status === "stopped") return true;
-  const seen = owner.lastSeenAt ? Date.parse(owner.lastSeenAt) : NaN;
-  return !Number.isFinite(seen) || Date.now() - seen > staleMs;
-}
+import { isOrphaned } from "../src/orphan.mjs";
+import { rhythm } from "../src/rhythm.mjs";
+
 
 /** Every ledger part for this project, oldest first — the current file plus any that
  *  rotation has closed. Reading only the current one would quietly lose history. */
