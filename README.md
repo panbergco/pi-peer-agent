@@ -6,19 +6,18 @@ findings into its context** the moment they matter. Built on pi's own extension 
 no MCP server, no tmux, no child processes.
 
 ```
-/peers launch observer-watch watch that all work stays on the calculator utility --tick 15
+/peers launch observer-watch keep every change inside rates.ts and tell me if anything wanders off it --tick 2
 ```
 
-Minutes later, when the main agent wanders off-scope, it receives — mid-work, at its
-next inference boundary:
+Minutes later, when work wanders off-scope, the finding arrives mid-turn — at the main
+agent's next inference boundary, without anyone asking for it:
 
-```
-[peer-agent] finding from agent://pi/<main-session>/sentinel-1 (steering) · tick 2
+![A watch agent catching real scope drift, and the main agent answering it](docs/images/peers-panel.png)
 
-The task boundary restricts work to the math.js calculator utility. The main agent
-just created promo.html (2KB landing page) … smallest correction: flag the conflict
-before expanding further.
-```
+*A real session, not a mock-up. The watch noticed a marketing page appear in a project
+scoped to one file, said so, and the main agent pushed back on the part it got wrong —
+authorship — which the watch then corrected. The raw terminal capture behind this image is
+`docs/images/peers-panel.ansi`.*
 
 Every peer is a **real pi session**: named, file-backed, individually resumable in any
 terminal — and if resumed standalone, it can still **report home** through the file
@@ -42,8 +41,13 @@ rather than pretending to wait.
 pi install git:github.com/panbergco/pi-peer-agent
 ```
 
-Requires nothing else. Models whose providers come from extensions (e.g. devin) work
-inside peers via the provider-extension bridge (see Configuration).
+That is the whole installation. It brings the extension, the five bundled roles, the
+`peer-agent` skill and the `pi-peer` command line; start (or `/reload`) a pi session and
+`/peers` is there. Nothing else is required — no server, no API key of its own, no
+background process. To update later, `pi update --extensions`.
+
+Models whose providers come from other extensions (e.g. devin) work inside agents through
+the provider-extension bridge — see Configuration.
 
 ## Use
 
