@@ -19,6 +19,9 @@ import { PeerSidecar, adoptHostKeybindings } from "../src/sidecar.js";
 import { AUTHORITY_TOOLS, shortId } from "../src/types.js";
 import type { Authority } from "../src/types.js";
 import { judge, loadRules, refusalText } from "../src/talkrules.mjs";
+// The shell command is the one implementation of every report; a session asks it for the
+// text rather than rendering the same answers a second time.
+import { REPORTS, report as peerReport } from "../bin/pi-peer.mjs";
 import { appendEvent, isOrphaned, loadConfig, markMainStopped, readRoster, registerMain, resetEventSink, setEventEmitter, setEventSink, touchMain, upsertAgentsBlock, type PeerEvent } from "../src/state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -628,8 +631,8 @@ export default function piPeerAgent(pi: ExtensionAPI) {
     version: 1,
   };
 
-  pi.registerCommand("peers", {
-    description: "peers: (bare = toggle sidecar) | launch/ask/retask/tick/model/authority/attach/stop/kill | tell-all | list",
+  pi.registerCommand("peer", {
+    description: "peer: (bare = toggle panel) | launch/ask/retask/tick/model/authority/attach/stop/kill | reports: list/census/findings/cost/history/doctor/audit/rules/roles/models | tell-all | list",
     // Main-editor argument autocomplete — verbs, then roles/callsigns per verb
     // (same UX as pi's own commands; the panel input has its own provider).
     getArgumentCompletions: (prefix: string) => {
@@ -647,6 +650,18 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         ["stop", "<name|all> — end the watch (session kept, resumable)"],
         ["kill", "<name> — end the watch AND delete the session"],
         ["list", "crew + available roles"],
+        // The reports, answered by the same command the shell runs — so the words are the
+        // same wherever you ask. Reads only: a write verb asked from inside the session
+        // that would apply it waits for itself.
+        ["census", "the full picture: every session and the agents it spawned"],
+        ["findings", "[name] — what agents have reported, from the record"],
+        ["cost", "what the crew has cost, per agent and in total"],
+        ["history", "each session and the agents it spawned, with transcripts"],
+        ["doctor", "one read-only check of config, state, orphans and the record"],
+        ["rules", "who may speak to whom, and the file each rule came from"],
+        ["audit", "every message attempted, with the rule that decided it"],
+        ["roles", "the roles you can launch, and the file each is defined in"],
+        ["models", "[filter] — the models an agent may be given"],
       ];
       if (words.length <= 1) {
         const hits = VERBS.filter(([v]) => v.startsWith(verb));
@@ -691,9 +706,19 @@ export default function piPeerAgent(pi: ExtensionAPI) {
       const [verb, ...rest] = argv.split(/\s+/).filter(Boolean);
 
       if (!verb) {
-        // bare /peers behaves exactly like the toggle key: opening makes the
+        // bare /peer behaves exactly like the toggle key: opening makes the
         // panel active unless focusOnOpen is disabled.
         toggleSidecar(ctx, config.focusOnOpen !== false);
+        return;
+      }
+
+      // A report, answered by the very command the shell runs, so the words cannot drift
+      // between the two surfaces. `list` keeps its own shape here because in a session it
+      // also names the roles you could launch.
+      if (REPORTS.includes(verb) && verb !== "list") {
+        peerReport([verb, ...rest], ctx.cwd)
+          .then((text) => ui?.notify?.(text || "(nothing to report)", "info"))
+          .catch((err: unknown) => ui?.notify?.(String(err).replace(/^Error: /, ""), "error"));
         return;
       }
 
@@ -702,7 +727,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const lines = [
           `roles: ${roles.map((r) => `${r.name} (${roleLine(r)})`).join("\n       ") || "none found"}`,
           `active: ${manager.active.map((p) => `${p.name}[t${p.tickCount}${p.findings.length ? ` ◆${p.findings.length}` : ""}]`).join(" · ") || "none"}`,
-          `usage: /peers (toggle panel) · /peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peers ask|retask|tick|model|authority|stop|kill … · /peers tell-all <text…>`,
+          `usage: /peer (toggle panel) · /peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>] · /peer ask|retask|tick|model|authority|stop|kill … · /peer tell-all <text…>`,
         ];
         ui?.notify?.(lines.join("\n"), "info");
         return;
@@ -766,7 +791,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const role = roles.find((r) => r.name === rest[0]) ?? adhocRole(rest.join(" ").trim(), { kind: kindOverride });
         if (!role) {
           const why = roleErrors.length ? ` · a role file could not be read: ${roleErrors.map((x) => x.message).join("; ")}` : "";
-          ui?.notify?.(`unknown role "${rest[0]}" — /peers list shows what exists${why}`, "error");
+          ui?.notify?.(`unknown role "${rest[0]}" — /peer list shows what exists${why}`, "error");
           return;
         }
         let task = taskWords.join(" ");
@@ -810,7 +835,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const name = rest[0] ?? "";
         const text = rest.slice(1).join(" ");
         if (!text) {
-          ui?.notify?.("usage: /peers ask <name> <message…>", "error");
+          ui?.notify?.("usage: /peer ask <name> <message…>", "error");
           return;
         }
         const res = await manager.ask(name, text, "operator");
@@ -842,7 +867,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const name = rest[0] ?? "";
         const minutes = Number(rest[1]);
         if (Number.isFinite(minutes) && minutes >= 1 && manager.setTick(name, minutes * 60)) ui?.notify?.(`${name}: tick → ${minutes}m`, "info");
-        else ui?.notify?.("usage: /peers tick <name> <minutes>=1", "error");
+        else ui?.notify?.("usage: /peer tick <name> <minutes>=1", "error");
         return;
       }
 
@@ -850,7 +875,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const name = rest[0] ?? "";
         const ref = rest.slice(1).join(" ");
         if (!name || !ref) {
-          ui?.notify?.("usage: /peers model <name> <provider/model|substring>", "error");
+          ui?.notify?.("usage: /peer model <name> <provider/model|substring>", "error");
           return;
         }
         const res = await manager.setPeerModel(name, ref);
@@ -862,11 +887,11 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         const [name, level] = rest;
         if (!name) {
           const rows = manager.all.map((p) => `  ${p.name}  ${p.role.authority ?? "read-only"}`);
-          ui?.notify?.(rows.length ? `authority levels:\n${rows.join("\n")}\n  change with: /peers authority <name> <read-only|write|shell>` : "no agents running", "info");
+          ui?.notify?.(rows.length ? `authority levels:\n${rows.join("\n")}\n  change with: /peer authority <name> <read-only|write|shell>` : "no agents running", "info");
           return;
         }
         if (!level || !["read-only", "write", "shell"].includes(level)) {
-          ui?.notify?.(`usage: /peers authority ${name} <read-only|write|shell>`, "error");
+          ui?.notify?.(`usage: /peer authority ${name} <read-only|write|shell>`, "error");
           return;
         }
         const res = await manager.setAuthority(name, level as Authority);
@@ -880,7 +905,7 @@ export default function piPeerAgent(pi: ExtensionAPI) {
         return;
       }
 
-      ui?.notify?.(`unknown verb "${verb}" — /peers list for usage`, "error");
+      ui?.notify?.(`unknown verb "${verb}" — /peer list for usage`, "error");
     },
   });
 

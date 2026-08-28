@@ -328,8 +328,8 @@ the main agent ends a watch.
 - \`peer_tell_all{text}\` · \`peer_stop{name|all}\` · \`peer_kill{name}\` · \`peer_panel{action: open|close, peer?}\`
 
 **Control surface — HUMAN (slash + panel):** \`/peers\` toggles the panel ·
-\`/peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]\` ·
-\`/peers ask|retask|tick|model|authority|stop|kill …\` · \`/peers tell-all <text…>\` · \`/peers list\` · panel commands mirror the same verbs.
+\`/peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]\` ·
+\`/peer ask|retask|tick|model|authority|stop|kill …\` · \`/peer tell-all <text…>\` · \`/peer list\` · panel commands mirror the same verbs.
 
 **Roles** come from \`peers/*.md\` (bundled: observer-watch, executor-tick,\nfinisher-condition, builder-once, reviewer-once;
 \`pi-peer roles\` prints each with its file),

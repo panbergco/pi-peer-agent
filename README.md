@@ -6,7 +6,7 @@ findings into its context** the moment they matter. Built on pi's own extension 
 no MCP server, no tmux, no child processes.
 
 ```
-/peers launch observer-watch keep every change inside rates.ts and tell me if anything wanders off it --tick 2
+/peer launch observer-watch keep every change inside rates.ts and tell me if anything wanders off it --tick 2
 ```
 
 Minutes later, when work wanders off-scope, the finding arrives mid-turn — at the main
@@ -43,7 +43,7 @@ pi install git:github.com/panbergco/pi-peer-agent
 
 That is the whole installation. It brings the extension, the five bundled roles, the
 `peer-agent` skill and the `pi-peer` command line; start (or `/reload`) a pi session and
-`/peers` is there. Nothing else is required — no server, no API key of its own, no
+`/peer` is there. Nothing else is required — no server, no API key of its own, no
 background process. To update later, `pi update --extensions`.
 
 Models whose providers come from other extensions (e.g. devin) work inside agents through
@@ -51,13 +51,13 @@ the provider-extension bridge — see Configuration.
 
 ## Use
 
-### One command: `/peers`
+### One command: `/peer`
 
-- `/peers` — toggle the panel
-- `/peers launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]`
-- `/peers ask <name> <text…>` · `/peers retask <name> <task…>` · `/peers tick <name> <minutes>`
-- `/peers model <name> <provider/model|substring>` · `/peers authority <name> <read-only|write|shell>` · `/peers tell-all <text…>`
-- `/peers stop <name|all>` · `/peers kill <name>` · `/peers list`
+- `/peer` — toggle the panel
+- `/peer launch <role> <task…> [--fork|--compacted|--fresh] [--tick <min>]`
+- `/peer ask <name> <text…>` · `/peer retask <name> <task…>` · `/peer tick <name> <minutes>`
+- `/peer model <name> <provider/model|substring>` · `/peer authority <name> <read-only|write|shell>` · `/peer tell-all <text…>`
+- `/peer stop <name|all>` · `/peer kill <name>` · `/peer list`
 
 ### Keys
 
@@ -251,7 +251,7 @@ accepted** and reaches you as steering rather than quiet news.
 ## An agent whose session died can join yours
 
 ```
-pi-peer attach reviewer-once-1  # or /peers attach reviewer-once-1 in a session
+pi-peer attach reviewer-once-1  # or /peer attach reviewer-once-1 in a session
 ```
 
 The panel shows stranded agents and how to adopt them. An adopted agent keeps its memory,

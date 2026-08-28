@@ -426,7 +426,7 @@ export class PeerSidecar extends Container implements Focusable {
   private command(cmd: string): void {
     const [verb, ...rest] = cmd.split(/\s+/).filter(Boolean);
     const peer = this.selectedPeer();
-    // Muscle memory: "/peers launch x" typed in the panel routes to "/launch x".
+    // Muscle memory: "/peer launch x" typed in the panel routes to "/launch x".
     if ((verb ?? "").toLowerCase() === "peers" || (verb ?? "").toLowerCase() === "peer") {
       if (rest.length === 0) {
         this.opts.onClose();
@@ -975,7 +975,7 @@ export class PeerSidecar extends Container implements Focusable {
               f.orphaned
                 ? f.elsewhere
                   ? `stranded in project ${basename(f.project ?? "")}`
-                  : `adopt it here: /peers attach ${f.name}`
+                  : `adopt it here: /peer attach ${f.name}`
                 : f.project
                   ? `project ${basename(f.project)}`
                   : "other session"
