@@ -18,7 +18,7 @@ import { PeerManager } from "../src/runtime.js";
 import { PeerSidecar, adoptHostKeybindings } from "../src/sidecar.js";
 import { AUTHORITY_TOOLS, shortId } from "../src/types.js";
 import type { Authority } from "../src/types.js";
-import { judge, loadRules, refusalText } from "../src/talkrules.js";
+import { judge, loadRules, refusalText } from "../src/talkrules.mjs";
 import { appendEvent, isOrphaned, loadConfig, markMainStopped, readRoster, registerMain, resetEventSink, setEventEmitter, setEventSink, touchMain, upsertAgentsBlock, type PeerEvent } from "../src/state.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

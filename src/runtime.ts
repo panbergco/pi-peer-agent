@@ -9,7 +9,7 @@ import { objectiveMet, parseHandoff, runGate, priorityRank, shortId, uid, AUTHOR
 import { appendEvent, isOrphaned, mutateRoster, readRoster, upsertAgentsBlock } from "./state.js";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { judge, loadRules, reachableProjects, refusalText, type TalkAttempt } from "./talkrules.js";
+import { judge, loadRules, reachableProjects, refusalText, type TalkAttempt } from "./talkrules.mjs";
 import { rhythmOf } from "./roles.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
