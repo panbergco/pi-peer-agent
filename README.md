@@ -380,4 +380,14 @@ transports, embedding notes — in [docs/peer-agent-spec.md](docs/peer-agent-spe
 - In-process session + overlay patterns: pi-btw-sidecar (MasuRii)
 - Role-file conventions: pi-subagents (nicobailon)
 
-MIT.
+## License
+
+**PolyForm Noncommercial 1.0.0** — see [`LICENSE`](LICENSE).
+
+Free to use, change and share for any **noncommercial** purpose: personal work, study,
+research, hobby projects, and any charity, school, university, public research body or
+government institution. Using it as part of a commercial undertaking is not covered — for
+that, ask.
+
+This is a source-available license, not an OSI-approved open-source one; that is
+deliberate.
