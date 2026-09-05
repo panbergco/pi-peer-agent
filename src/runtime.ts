@@ -403,8 +403,22 @@ export class PeerManager {
       const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
       lines[0] = `PROJECT YOU SERVE: ${basename(root)} (${root})`;
       try {
-        const branch = execFileSync("git", ["-C", root, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", timeout: 4000 }).trim();
-        const remote = execFileSync("git", ["-C", root, "remote", "get-url", "origin"], { encoding: "utf8", timeout: 4000 }).trim();
+        // stderr must be piped: execFileSync inherits it by default, so a failing
+        // git call writes straight to the terminal and paints over the host TUI.
+        const git = (args: string[]) =>
+          execFileSync("git", ["-C", root, ...args], {
+            encoding: "utf8",
+            timeout: 4000,
+            stdio: ["ignore", "pipe", "pipe"],
+          }).trim();
+        const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+        // a repo with no origin is normal — still report the branch.
+        let remote = "";
+        try {
+          remote = git(["remote", "get-url", "origin"]);
+        } catch {
+          /* no origin remote — fine */
+        }
         lines.push(`git: branch ${branch}${remote ? ` · origin ${remote}` : ""}`);
       } catch {
         /* not a git repo — fine */
