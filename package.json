@@ -4,7 +4,8 @@
   "description": "Resident peer agents for pi: long-running partners that live inside your session, tick on their own rhythm, watch the work, and push findings back into the conversation.",
   "type": "module",
   "scripts": {
-    "check:panel-latency": "node tools/panel-latency-check.mjs"
+    "check:panel-latency": "node tools/panel-latency-check.mjs",
+    "check:git-context": "node tools/git-context-check.mjs"
   },
   "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
