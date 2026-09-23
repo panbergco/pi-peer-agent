@@ -356,7 +356,7 @@ while off.
 | `toggleKey` | `ctrl+alt+o` | panel Open/hide |
 | `focusKey` | `ctrl+alt+p` | keyboard panel ⇄ main prompt |
 | `overlayWidthRatio` / `overlayHeightRatio` | `0.7` | panel size vs terminal |
-| `providerExtensions` | `["pi-devin-auth", "pi-anthropic-oauth", "a model-rotation extension"]` | provider packages loaded into agent sessions, so an agent can use the same models you can. Resolved from wherever pi installed them (npm or git). Add any other provider package by name. |
+| `providerExtensions` | `["pi-devin-auth", "pi-anthropic-oauth"]` | provider packages loaded into agent sessions, so an agent can use the same models you can. Resolved from wherever pi installed them (npm or git). Add any other provider package by name. |
 | `deltaCapChars`, `backoff` | `6000`, `[1,2,4,8]` | tick delta cap, quiet-backoff ladder |
 
 ## State

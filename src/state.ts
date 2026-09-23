@@ -76,7 +76,7 @@ function parentOf(cwd: string, peer: unknown): string | undefined {
 /** These files are private to the person running the session. The ledger carries an
  *  agent's own words and quoted repository content, the roster carries every task, and
  *  the panel state carries half-written messages. 0600, enforced on every write, because
- *  a mode set once is a mode something else can loosen. (a model-rotation extension, 2026-08-09: same
+ *  a mode set once is a mode something else can loosen. (a rotation extension, 2026-08-09: same
  *  machine, same class of data, and it was already doing this.) */
 const PRIVATE = 0o600;
 function keepPrivate(file: string): void {
@@ -129,7 +129,7 @@ export function appendEvent(cwd: string, kind: string, payload: Record<string, u
     // file-wide sequence while restarting at 1 on every session, so it could not do the
     // one job such a counter has: notice that lines are missing. Named for what it is,
     // and `pi-peer doctor` now checks each session's run for gaps — which works even
-    // though several sessions interleave in one file (a model-rotation extension, 2026-08-09).
+    // though several sessions interleave in one file (a rotation extension, 2026-08-09).
     sessionSeq: ++seq,
     ts: new Date().toISOString(),
     kind,

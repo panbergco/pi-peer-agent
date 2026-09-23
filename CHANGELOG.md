@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.25.1
+
+- The `providerExtensions` default lists only published packages. Add any other provider
+  extension in `~/.pi/agent/peer-agent.json`, which replaces the default.
+
 ## 0.25.0
 
 **Breaking — the verbs now say who is talking to whom.** One word, `talk`, was used for two
@@ -15,7 +20,7 @@ implied everyone while reaching one crew. The old names are gone rather than ali
 
 ## 0.24.0 — 2026-08-09 — BREAKING: the ledger's shape changed
 
-Three faults found by the a model-rotation extension extension while aligning the two products. All three
+Three faults found by a model-rotation extension while aligning the two products. All three
 were real.
 
 - **BREAKING — `seq` is now `sessionSeq`, and it means what it says.** It was a
@@ -45,7 +50,7 @@ were real.
   extension.** Provider extensions were resolved only from the npm folder, so a provider
   the operator could select in their own session was never loaded for their agents — every
   tick failed with "No API key found for <provider>". They are now resolved wherever pi
-  installed them, and `a model-rotation extension` ships in the default list.
+  installed them.
 - `pi-peer census --json` publishes the crew for programs to read, including the product's
   own live/orphaned verdict.
 

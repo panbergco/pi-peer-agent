@@ -273,7 +273,7 @@ export const DEFAULT_CONFIG: PeerConfig = {
   maxPeers: 6,
   overlayWidthRatio: 0.7,
   overlayHeightRatio: 0.7,
-  providerExtensions: ["pi-devin-auth", "pi-anthropic-oauth", "a model-rotation extension"],
+  providerExtensions: ["pi-devin-auth", "pi-anthropic-oauth"],
   backoff: [1, 2, 4, 8],
   deltaCapChars: 6000,
 };
